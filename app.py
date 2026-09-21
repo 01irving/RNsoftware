@@ -1,4 +1,5 @@
 import csv
+import io
 import re
 import sqlite3
 import tkinter as tk
@@ -50,6 +51,49 @@ PRUEBAS = [
 ]
 
 
+CSV_DEFAULT = {
+    "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
+28,815,1147,1470
+29,881,1317,1660
+30,1065,1511,1800
+31,1230,1615,1994
+32,1364,1768,2228
+33,1553,1986,2498
+34,1784,2246,2692
+35,1908,2442,2987
+36,2168,2777,3300
+37,2450,2957,3514
+38,2641,3135,3690
+39,2747,3254,3800
+40,2825,3332,3900
+41,2875,3402,3950
+42,2890,3484,4100
+""",
+    "ninas.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
+28,846,1037,1352
+29,854,1165,1576
+30,1030,1348,1740
+31,1200,1512,1910
+32,1390,1730,2120
+33,1588,1958,2406
+34,1786,2143,2694
+35,1879,2343,2862
+36,2120,2635,3174
+37,2379,2857,3386
+38,2580,3040,3588
+39,2700,3153,3682
+40,2760,3247,3800
+41,2788,3267,3825
+42,2800,3277,3978
+""",
+    "clasificaciones.csv": """Percentil,Interpretación
+< 10,Pequeño para la edad de gestación
+10 a 90,Apropiado para la edad de gestación
+> 90,Grande para la edad de gestación
+""",
+}
+
+
 def conectar():
     conn = sqlite3.connect(DB)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -97,12 +141,25 @@ class App(tk.Tk):
         conn.commit()
 
     def _cargar_referencias(self, conn):
-        if conn.execute("SELECT COUNT(*) FROM referencia_peso_nacer").fetchone()[0]:
-            return
-        data_dir = Path(__file__).resolve().parent / "data"
-        for archivo, sexo in (("ninos.csv", "Masculino"), ("ninas.csv", "Femenino")):
-            with open(data_dir / archivo, encoding="utf-8-sig") as f:
-                for fila in csv.DictReader(f):
+        if conn.execute("SELECT COUNT(*) FROM archivo_csv").fetchone()[0] == 0:
+            data_dir = Path(__file__).resolve().parent / "data"
+            for nombre in ("ninos.csv", "ninas.csv", "clasificaciones.csv"):
+                origen = data_dir / nombre
+                if origen.exists():
+                    contenido = origen.read_text(encoding="utf-8-sig")
+                else:
+                    contenido = CSV_DEFAULT[nombre]
+                conn.execute(
+                    "INSERT INTO archivo_csv (nombre, contenido) VALUES (?,?)",
+                    (nombre, contenido),
+                )
+            conn.commit()
+        if conn.execute("SELECT COUNT(*) FROM referencia_peso_nacer").fetchone()[0] == 0:
+            for nombre, sexo in (("ninos.csv", "Masculino"), ("ninas.csv", "Femenino")):
+                contenido = conn.execute(
+                    "SELECT contenido FROM archivo_csv WHERE nombre = ?", (nombre,)
+                ).fetchone()[0]
+                for fila in csv.DictReader(io.StringIO(contenido)):
                     conn.execute(
                         "INSERT INTO referencia_peso_nacer (sexo, edad_gestacional_semanas, percentil_10_g, percentil_50_g, percentil_90_g) VALUES (?,?,?,?,?)",
                         (
@@ -113,8 +170,11 @@ class App(tk.Tk):
                             float(fila["Percentil_90_peso_g"]),
                         ),
                     )
-        with open(data_dir / "clasificaciones.csv", encoding="utf-8-sig") as f:
-            for fila in csv.DictReader(f):
+        if conn.execute("SELECT COUNT(*) FROM clasificacion_eg").fetchone()[0] == 0:
+            contenido = conn.execute(
+                "SELECT contenido FROM archivo_csv WHERE nombre = 'clasificaciones.csv'"
+            ).fetchone()[0]
+            for fila in csv.DictReader(io.StringIO(contenido)):
                 conn.execute(
                     "INSERT INTO clasificacion_eg (percentil, interpretacion) VALUES (?,?)",
                     (fila["Percentil"], fila["Interpretación"]),

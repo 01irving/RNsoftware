@@ -75,3 +75,9 @@ CREATE TABLE IF NOT EXISTS clasificacion_eg (
     percentil TEXT NOT NULL,
     interpretacion TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS archivo_csv (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE,
+    contenido TEXT NOT NULL
+);
