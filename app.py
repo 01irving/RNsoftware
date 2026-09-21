@@ -1,5 +1,8 @@
+import csv
+import re
 import sqlite3
 import tkinter as tk
+from datetime import date, datetime
 from tkinter import ttk, messagebox
 from pathlib import Path
 
@@ -65,8 +68,58 @@ class App(tk.Tk):
         sql = (Path(__file__).resolve().parent / "esquema.sql").read_text(encoding="utf-8")
         conn = conectar()
         conn.executescript(sql)
+        self._migrar(conn)
+        self._cargar_referencias(conn)
         conn.commit()
         conn.close()
+
+    def _migrar(self, conn):
+        columnas = [fila[1] for fila in conn.execute("PRAGMA table_info(antecedentes)")]
+        if "clasificacion_peso_nacer" not in columnas:
+            conn.execute("ALTER TABLE antecedentes ADD COLUMN clasificacion_peso_nacer TEXT")
+        col_pac = [fila[1] for fila in conn.execute("PRAGMA table_info(paciente)")]
+        if "nombre" not in col_pac:
+            conn.execute("ALTER TABLE paciente ADD COLUMN nombre TEXT")
+        if "direccion" not in col_pac:
+            conn.execute("ALTER TABLE paciente ADD COLUMN direccion TEXT")
+        if "telefono" not in col_pac:
+            conn.execute("ALTER TABLE paciente ADD COLUMN telefono TEXT")
+        if "edad" not in col_pac:
+            conn.execute("ALTER TABLE paciente ADD COLUMN edad TEXT")
+        if "fecha_actual" not in col_pac:
+            conn.execute("ALTER TABLE paciente ADD COLUMN fecha_actual TEXT")
+        for col_vieja in ("fecha_ingreso", "fecha_alta", "edad_anios", "edad_meses"):
+            if col_vieja in col_pac:
+                try:
+                    conn.execute(f"ALTER TABLE paciente DROP COLUMN {col_vieja}")
+                except sqlite3.OperationalError:
+                    pass
+        conn.commit()
+
+    def _cargar_referencias(self, conn):
+        if conn.execute("SELECT COUNT(*) FROM referencia_peso_nacer").fetchone()[0]:
+            return
+        data_dir = Path(__file__).resolve().parent / "data"
+        for archivo, sexo in (("ninos.csv", "Masculino"), ("ninas.csv", "Femenino")):
+            with open(data_dir / archivo, encoding="utf-8-sig") as f:
+                for fila in csv.DictReader(f):
+                    conn.execute(
+                        "INSERT INTO referencia_peso_nacer (sexo, edad_gestacional_semanas, percentil_10_g, percentil_50_g, percentil_90_g) VALUES (?,?,?,?,?)",
+                        (
+                            sexo,
+                            int(fila["Edad_gestacional_semanas"]),
+                            float(fila["Percentil_10_peso_g"]),
+                            float(fila["Percentil_50_peso_g"]),
+                            float(fila["Percentil_90_peso_g"]),
+                        ),
+                    )
+        with open(data_dir / "clasificaciones.csv", encoding="utf-8-sig") as f:
+            for fila in csv.DictReader(f):
+                conn.execute(
+                    "INSERT INTO clasificacion_eg (percentil, interpretacion) VALUES (?,?)",
+                    (fila["Percentil"], fila["Interpretación"]),
+                )
+        conn.commit()
 
     def _crear_notebook(self):
         self.notebook = ttk.Notebook(self)
@@ -106,47 +159,56 @@ class App(tk.Tk):
         marco = ttk.LabelFrame(tab, text="Datos Generales")
         marco.pack(fill="x", padx=8, pady=8)
         campos = [
-            ("Servicio", "servicio"), ("DNI/HC", "dni"), ("Cuenta", "cuenta"),
-            ("Cama", "cama"),
+            ("Nombre", "nombre"), ("Servicio", "servicio"), ("DNI/HC", "dni"),
+            ("Cuenta", "cuenta"), ("Cama", "cama"),
         ]
         self.campos = {}
         for i, (etiqueta, clave) in enumerate(campos):
-            ttk.Label(marco, text=etiqueta).grid(row=0, column=i * 2, sticky="w", padx=5, pady=4)
+            fila, col = divmod(i, 3)
+            ttk.Label(marco, text=etiqueta).grid(row=fila, column=col * 2, sticky="w", padx=5, pady=4)
             var = tk.StringVar()
-            ttk.Entry(marco, textvariable=var, width=16).grid(row=0, column=i * 2 + 1, padx=5, pady=4)
+            ttk.Entry(marco, textvariable=var, width=16).grid(row=fila, column=col * 2 + 1, padx=5, pady=4)
             self.campos[clave] = var
 
-        ttk.Label(marco, text="Sexo").grid(row=1, column=0, sticky="w", padx=5)
+        ttk.Label(marco, text="Sexo").grid(row=1, column=4, sticky="w", padx=5)
         self.sexo = tk.StringVar(value="Femenino")
         ttk.Combobox(marco, textvariable=self.sexo, values=["Femenino", "Masculino"], state="readonly", width=14).grid(
-            row=1, column=1, padx=5, pady=4)
+            row=1, column=5, padx=5, pady=4)
 
         fechas = [
-            ("F. Nacimiento", "fecha_nacimiento"), ("F. Ingreso", "fecha_ingreso"),
-            ("F. Alta", "fecha_alta"),
+            ("F. Nacimiento", "fecha_nacimiento"), ("Fecha actual", "fecha_actual"),
         ]
         for i, (etiqueta, clave) in enumerate(fechas):
-            col = 2 + i * 2
-            ttk.Label(marco, text=etiqueta).grid(row=1, column=col, sticky="w", padx=5)
+            col = i * 2
+            ttk.Label(marco, text=etiqueta).grid(row=2, column=col, sticky="w", padx=5)
             var = tk.StringVar()
-            ttk.Entry(marco, textvariable=var, width=14).grid(row=1, column=col + 1, padx=5)
+            ttk.Entry(marco, textvariable=var, width=14).grid(row=2, column=col + 1, padx=5)
             self.campos[clave] = var
 
-        ttk.Label(marco, text="Edad").grid(row=2, column=0, sticky="w", padx=5, pady=4)
-        self.edad_anios = tk.StringVar()
-        ttk.Spinbox(marco, from_=0, to=18, textvariable=self.edad_anios, width=6).grid(row=2, column=1, padx=5, sticky="w")
-        self.edad_meses = tk.StringVar()
-        ttk.Spinbox(marco, from_=0, to=11, textvariable=self.edad_meses, width=6).grid(row=2, column=2, padx=5, sticky="w")
-        self.campos["edad_anios"] = self.edad_anios
-        self.campos["edad_meses"] = self.edad_meses
+        ttk.Label(marco, text="Edad").grid(row=3, column=0, sticky="w", padx=5, pady=4)
+        self.campos["edad"] = tk.StringVar()
+        edad_entry = ttk.Entry(marco, textvariable=self.campos["edad"], width=22, state="readonly")
+        edad_entry.grid(row=3, column=1, columnspan=2, padx=5, sticky="w")
+        self.campos["edad_entry"] = edad_entry
 
-        ttk.Label(marco, text="Grado de Instrucción Padre/Cuidador").grid(row=3, column=0, columnspan=2, sticky="w", padx=5, pady=4)
+        self.campos["fecha_nacimiento"].trace_add("write", lambda *_: self._calcular_edad())
+        self.campos["fecha_actual"].trace_add("write", lambda *_: self._calcular_edad())
+        self.campos["fecha_actual"].set(date.today().isoformat())
+
+        ttk.Label(marco, text="Grado de Instrucción Padre/Cuidador").grid(row=4, column=0, columnspan=2, sticky="w", padx=5, pady=4)
         self.campos["grado_padre"] = tk.StringVar()
-        ttk.Entry(marco, textvariable=self.campos["grado_padre"], width=25).grid(row=3, column=2, columnspan=2, padx=5)
+        ttk.Entry(marco, textvariable=self.campos["grado_padre"], width=25).grid(row=4, column=2, columnspan=2, padx=5)
 
-        ttk.Label(marco, text="Grado de Instrucción Madre/Cuidador").grid(row=4, column=0, columnspan=2, sticky="w", padx=5, pady=4)
+        ttk.Label(marco, text="Grado de Instrucción Madre/Cuidador").grid(row=5, column=0, columnspan=2, sticky="w", padx=5, pady=4)
         self.campos["grado_madre"] = tk.StringVar()
-        ttk.Entry(marco, textvariable=self.campos["grado_madre"], width=25).grid(row=4, column=2, columnspan=2, padx=5)
+        ttk.Entry(marco, textvariable=self.campos["grado_madre"], width=25).grid(row=5, column=2, columnspan=2, padx=5)
+
+        ttk.Label(marco, text="Dirección").grid(row=6, column=0, sticky="w", padx=5, pady=4)
+        self.campos["direccion"] = tk.StringVar()
+        ttk.Entry(marco, textvariable=self.campos["direccion"], width=25).grid(row=6, column=1, columnspan=2, padx=5, sticky="w")
+        ttk.Label(marco, text="Teléfono").grid(row=6, column=3, sticky="w", padx=5)
+        self.campos["telefono"] = tk.StringVar()
+        ttk.Entry(marco, textvariable=self.campos["telefono"], width=14).grid(row=6, column=4, padx=5, sticky="w")
 
         marco_dx = ttk.LabelFrame(tab, text="B) Dx. Médico")
         marco_dx.pack(fill="both", expand=True, padx=8, pady=8)
@@ -177,6 +239,25 @@ class App(tk.Tk):
         marco_familia.pack(fill="both", expand=True, padx=8, pady=8)
         self.ant["familiares"] = tk.Text(marco_familia, height=6)
         self.ant["familiares"].pack(fill="both", expand=True, padx=6, pady=6)
+
+        marco_clas = ttk.LabelFrame(tab, text="Clasificación según Edad Gestacional, Peso al Nacer y Sexo")
+        marco_clas.pack(fill="x", padx=8, pady=8)
+        ttk.Label(marco_clas, text="Sexo al nacer:").grid(row=0, column=0, sticky="w", padx=5, pady=4)
+        self.sexo_nacer = tk.StringVar(value=self.sexo.get())
+        ttk.Combobox(
+            marco_clas, textvariable=self.sexo_nacer,
+            values=["Femenino", "Masculino"], state="readonly", width=14,
+        ).grid(row=0, column=1, sticky="w", padx=5, pady=4)
+        ttk.Label(marco_clas, text="Peso al nacer en gramos (si está en kg, se convierte a g):").grid(
+            row=1, column=0, sticky="w", padx=5, pady=4)
+        self.clas_peso = tk.StringVar()
+        ttk.Entry(marco_clas, textvariable=self.clas_peso, width=14).grid(row=1, column=1, sticky="w", padx=5, pady=4)
+        ttk.Button(marco_clas, text="Clasificar", command=self._clasificar).grid(row=2, column=0, sticky="w", padx=5, pady=4)
+        ttk.Button(marco_clas, text="Calcular EG desde F. de Nacimiento", command=self._calc_eg_desde_nacimiento).grid(
+            row=2, column=1, sticky="w", padx=5, pady=4)
+        self.clas_resultado = tk.Label(marco_clas, text="", justify="left", foreground="blue", wraplength=700)
+        self.clas_resultado.grid(row=3, column=0, columnspan=4, sticky="w", padx=5, pady=4)
+        self.clas_peso_ok = False
 
     # ---------- Pestaña 2 Signos Clínicos ----------
     def _tab_signos(self):
@@ -219,22 +300,105 @@ class App(tk.Tk):
             self.bio_tree.insert("", "end", values=(prueba, valor, ""))
 
     # ---------- Acciones ----------
+    def _parsedias_desde_nacimiento(self):
+        texto = self.campos["fecha_nacimiento"].get().strip()
+        if not texto:
+            return None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
+            try:
+                fecha = datetime.strptime(texto, fmt).date()
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+        hasta = self.campos["fecha_actual"].get().strip()
+        try:
+            ref = datetime.strptime(hasta, "%Y-%m-%d").date()
+        except ValueError:
+            ref = date.today()
+        return (ref - fecha).days
+
+    def _dias_desde_nacimiento(self):
+        dias = self._parsedias_desde_nacimiento()
+        if dias is None:
+            messagebox.showwarning("Edad", "Fecha de nacimiento no válida (use AAAA-MM-DD)")
+        return dias
+
+    def _calc_eg_desde_nacimiento(self):
+        dias = self._dias_desde_nacimiento()
+        if dias is None:
+            return
+        semanas, resto = divmod(dias, 7)
+        self.ant["edad_gestacional"].set(f"{semanas} semanas y {resto} días")
+        self.clas_resultado.config(text=f"Desde el nacimiento: {dias} días = {semanas} semanas y {resto} días")
+        self._clasificacion = ""
+
+    def _calcular_edad(self):
+        dias = self._parsedias_desde_nacimiento()
+        if dias is None:
+            self.campos["edad"].set("")
+            return
+        semanas, resto = divmod(dias, 7)
+        self.campos["edad"].set(f"{semanas} semanas y {resto} días")
+
+    def _clasificar(self):
+        try:
+            semanas = int(re.match(r"\d+", self.ant["edad_gestacional"].get().strip()).group())
+        except (AttributeError, ValueError):
+            messagebox.showwarning("Clasificación", "Ingrese la edad gestacional en semanas (ej.: 39)")
+            return
+        try:
+            peso = float(self.clas_peso.get().replace(",", ".").strip())
+            if peso < 10:
+                peso *= 1000
+        except ValueError:
+            messagebox.showwarning("Clasificación", "Ingrese el peso al nacer (en gramos o kg)")
+            return
+        sexo = self.sexo_nacer.get()
+        conn = conectar()
+        fila = conn.execute(
+            "SELECT percentil_10_g, percentil_50_g, percentil_90_g FROM referencia_peso_nacer WHERE sexo = ? AND edad_gestacional_semanas = ?",
+            (sexo, semanas),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            messagebox.showwarning("Clasificación", f"No hay referencia para la semana {semanas} ({sexo})")
+            return
+        p10, p50, p90 = fila
+        if peso < p10:
+            codigo = "PEG"
+            texto = "Pequeño para la Edad de Gestación"
+        elif peso <= p90:
+            codigo = "AEG"
+            texto = "Apropiado para la Edad de Gestación"
+        else:
+            codigo = "GEG"
+            texto = "Grande para la Edad de Gestación"
+        self._clasificacion = f"{codigo} - {texto}"
+        self.clas_peso_ok = True
+        self.clas_resultado.config(
+            text=f"P10: {int(p10)} g | P50: {int(p50)} g | P90: {int(p90)} g\n"
+                 f"Peso: {int(peso)} g --> {codigo}: {texto}"
+        )
+
     def guardar(self):
         try:
             conn = conectar()
             cur = conn.cursor()
             cur.execute(
                 """INSERT INTO paciente
-                   (servicio, dni_hc, cuenta, sexo, cama, fecha_nacimiento,
-                    edad_anios, edad_meses, fecha_ingreso, fecha_alta,
+                   (nombre, servicio, direccion, telefono, dni_hc, cuenta, sexo, cama, fecha_nacimiento,
+                    edad, fecha_actual,
                     dx_medico, grado_instruccion_padre, grado_instruccion_madre)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    self.campos["servicio"].get(), self.campos["dni"].get(),
+                    self.campos["nombre"].get(), self.campos["servicio"].get(),
+                    self.campos["direccion"].get(), self.campos["telefono"].get(),
+                    self.campos["dni"].get(),
                     self.campos["cuenta"].get(), self.sexo.get(), self.campos["cama"].get(),
-                    self.campos["fecha_nacimiento"].get(), self._int(self.campos["edad_anios"].get()),
-                    self._int(self.campos["edad_meses"].get()), self.campos["fecha_ingreso"].get(),
-                    self.campos["fecha_alta"].get(), self.campos["dx_medico"].get(),
+                    self.campos["fecha_nacimiento"].get(), self.campos["edad"].get(),
+                    self.campos["fecha_actual"].get(), self.campos["dx_medico"].get(),
                     self.campos["grado_padre"].get(), self.campos["grado_madre"].get(),
                 ),
             )
@@ -243,13 +407,15 @@ class App(tk.Tk):
             cur.execute(
                 """INSERT INTO antecedentes
                    (paciente_id, edad_gestacional, parto, peso_nacer,
-                    perimetro_cefalico_nacer, longitud_nacer, antecedentes_familiares)
-                   VALUES (?,?,?,?,?,?,?)""",
+                    perimetro_cefalico_nacer, longitud_nacer, antecedentes_familiares,
+                    clasificacion_peso_nacer)
+                   VALUES (?,?,?,?,?,?,?,?)""",
                 (
                     paciente_id, self.ant["edad_gestacional"].get(), self.ant["parto"].get(),
                     self.ant["peso_nacer"].get(), self.ant["perimetro_cefalico_nacer"].get(),
                     self.ant["longitud_nacer"].get(),
                     self.ant["familiares"].get("1.0", "end").strip(),
+                    getattr(self, "_clasificacion", ""),
                 ),
             )
 
@@ -287,11 +453,17 @@ class App(tk.Tk):
         for var in self.campos.values():
             if isinstance(var, tk.StringVar):
                 var.set("")
+        self.campos["fecha_actual"].set(date.today().isoformat())
         for var in self.ant.values():
             if isinstance(var, tk.StringVar):
                 var.set("")
             elif isinstance(var, tk.Text):
                 var.delete("1.0", "end")
+        self.sexo_nacer.set(self.sexo.get())
+        self.clas_peso.set("")
+        self.clas_resultado.config(text="")
+        self.clas_peso_ok = False
+        self._clasificacion = ""
         for item in self.signos_tree.get_children():
             self.signos_tree.delete(item)
         for organo in ORGANOS:
@@ -303,13 +475,6 @@ class App(tk.Tk):
         for prueba, valor in PRUEBAS:
             self.bio_tree.insert("", "end", values=(prueba, valor, ""))
         self.status.config(text="")
-
-    @staticmethod
-    def _int(valor):
-        try:
-            return int(valor)
-        except (TypeError, ValueError):
-            return None
 
 
 if __name__ == "__main__":
