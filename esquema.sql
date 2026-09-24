@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS antecedentes (
     perimetro_cefalico_nacer TEXT,
     longitud_nacer TEXT,
     antecedentes_familiares TEXT,
-    clasificacion_peso_nacer TEXT
+    clasificacion_peso_nacer TEXT,
+    valoracion_ganancia_peso TEXT,
+    valoracion_peso_edad TEXT,
+    valoracion_velocidad_crecimiento TEXT,
+    valoracion_zscore_oms TEXT
 );
 
 CREATE TABLE IF NOT EXISTS signos_clinicos (
@@ -80,4 +84,61 @@ CREATE TABLE IF NOT EXISTS archivo_csv (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL UNIQUE,
     contenido TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referencia_ganancia_peso (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sexo TEXT NOT NULL,
+    intervalo_dias TEXT NOT NULL,
+    percentil INTEGER NOT NULL,
+    peso_nacer_2000_2500_g REAL,
+    peso_nacer_2500_3000_g REAL,
+    peso_nacer_3000_3500_g REAL,
+    peso_nacer_3500_4000_g REAL,
+    peso_nacer_4000_mas_g REAL,
+    todos_g REAL,
+    UNIQUE (sexo, intervalo_dias, percentil)
+);
+
+CREATE TABLE IF NOT EXISTS visita_ganancia_peso (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    fecha_visita TEXT NOT NULL,
+    sexo TEXT,
+    peso_nacer_g REAL,
+    peso_actual_g REAL,
+    ganancia_g REAL,
+    percentil TEXT,
+    intervalo_dias TEXT,
+    dias_vida INTEGER,
+    fecha_registro TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS referencia_peso_edad (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sexo TEXT NOT NULL,
+    edad_dias INTEGER NOT NULL,
+    edad_etiqueta TEXT,
+    p3 REAL,
+    p15 REAL,
+    p50 REAL,
+    p85 REAL,
+    p97 REAL,
+    UNIQUE (sexo, edad_dias)
+);
+
+CREATE TABLE IF NOT EXISTS referencia_velocidad_crecimiento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sexo TEXT NOT NULL,
+    ventana TEXT NOT NULL,
+    edad_ini_dias INTEGER NOT NULL,
+    edad_fin_dias INTEGER NOT NULL,
+    peso_nacer_min_kg REAL,
+    peso_nacer_max_kg REAL,
+    p3 REAL,
+    p15 REAL,
+    p50 REAL,
+    p85 REAL,
+    p97 REAL,
+    nota TEXT
 );
