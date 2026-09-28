@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS antecedentes (
     valoracion_ganancia_peso TEXT,
     valoracion_peso_edad TEXT,
     valoracion_velocidad_crecimiento TEXT,
-    valoracion_zscore_oms TEXT
+    valoracion_zscore_oms TEXT,
+    valoracion_velocidad_oms TEXT
 );
 
 CREATE TABLE IF NOT EXISTS signos_clinicos (
@@ -100,6 +101,18 @@ CREATE TABLE IF NOT EXISTS referencia_ganancia_peso (
     UNIQUE (sexo, intervalo_dias, percentil)
 );
 
+CREATE TABLE IF NOT EXISTS referencia_ganancia_peso_muestra (
+    sexo TEXT NOT NULL,
+    intervalo_dias TEXT NOT NULL,
+    n_peso_nacer_2000_2500 INTEGER,
+    n_peso_nacer_2500_3000 INTEGER,
+    n_peso_nacer_3000_3500 INTEGER,
+    n_peso_nacer_3500_4000 INTEGER,
+    n_peso_nacer_4000_mas INTEGER,
+    n_todos INTEGER,
+    PRIMARY KEY (sexo, intervalo_dias)
+);
+
 CREATE TABLE IF NOT EXISTS visita_ganancia_peso (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
@@ -111,6 +124,8 @@ CREATE TABLE IF NOT EXISTS visita_ganancia_peso (
     percentil TEXT,
     intervalo_dias TEXT,
     dias_vida INTEGER,
+    velocidad_g_dia REAL,
+    velocidad_percentil TEXT,
     fecha_registro TEXT DEFAULT (datetime('now','localtime'))
 );
 
@@ -142,3 +157,31 @@ CREATE TABLE IF NOT EXISTS referencia_velocidad_crecimiento (
     p97 REAL,
     nota TEXT
 );
+
+CREATE TABLE IF NOT EXISTS referencia_velocidad_peso_ecrn (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sexo TEXT NOT NULL,
+    intervalo_dias TEXT NOT NULL,
+    percentil TEXT NOT NULL,
+    peso_nacer_2000_2500_g REAL,
+    peso_nacer_2500_3000_g REAL,
+    peso_nacer_3000_3500_g REAL,
+    peso_nacer_3500_4000_g REAL,
+    peso_nacer_4000_mas_g REAL,
+    todos_g REAL,
+    UNIQUE (sexo, intervalo_dias, percentil)
+);
+
+CREATE TABLE IF NOT EXISTS referencia_velocidad_oms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    indicador TEXT NOT NULL,
+    sexo TEXT NOT NULL,
+    intervalo_meses INTEGER NOT NULL,
+    mes_inicio REAL NOT NULL,
+    mes_fin REAL NOT NULL,
+    l REAL NOT NULL,
+    m REAL NOT NULL,
+    s REAL NOT NULL,
+    delta REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_velocidad_oms ON referencia_velocidad_oms(indicador, sexo, intervalo_meses);

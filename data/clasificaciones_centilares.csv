@@ -1,0 +1,13 @@
+﻿codigo,rango_percentil,interpretacion_operativa
+P<1,<1,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P1–<3,1 a <3,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P3–<5,3 a <5,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P5–<15,5 a <15,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P15–<25,15 a <25,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P25–<50,25 a <50,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P50–<75,50 a <75,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P75–<85,75 a <85,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P85–<95,85 a <95,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P95–<97,95 a <97,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P97–<99,97 a <99,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
+P≥99,≥99,Clasificación por rango centilar; interpretar junto con crecimiento alcanzado y evolución clínica.
