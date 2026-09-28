@@ -1,2 +1,3 @@
 anthro==1.1.1
 pygrowup2==1.0.0
+openpyxl==3.1.5

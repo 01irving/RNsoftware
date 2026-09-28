@@ -185,3 +185,20 @@ CREATE TABLE IF NOT EXISTS referencia_velocidad_oms (
     delta REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_velocidad_oms ON referencia_velocidad_oms(indicador, sexo, intervalo_meses);
+
+CREATE TABLE IF NOT EXISTS evaluacion_cans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    fecha_evaluacion TEXT,
+    edad_gestacional TEXT,
+    total INTEGER,
+    malnutricion_fetal INTEGER,
+    interpretacion TEXT,
+    scores_json TEXT,
+    observaciones TEXT,
+    indice_ponderal REAL,
+    peso_nacer_g REAL,
+    longitud_nacer_cm REAL,
+    fecha_registro TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_cans_paciente ON evaluacion_cans(paciente_id);

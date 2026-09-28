@@ -1,12 +1,13 @@
 import csv
 import io
+import json
 import math
 import re
 import sqlite3
 import tkinter as tk
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
 from pathlib import Path
 
 try:
@@ -26,12 +27,147 @@ except ImportError:
     _ANTHRO_MOD = None
     ANTHRO_OK = False
 
+try:
+    from openpyxl import Workbook as _XlsxWorkbook
+    from openpyxl.styles import Font as _XlsxFont, Alignment as _XlsxAlignment, PatternFill as _XlsxFill
+    from openpyxl.utils import get_column_letter as _xlsx_col
+    OPENPYXL_OK = True
+except ImportError:
+    _XlsxWorkbook = None
+    _XlsxFont = _XlsxAlignment = _XlsxFill = None
+    _xlsx_col = None
+    OPENPYXL_OK = False
+
 DB = Path(__file__).resolve().parent / "hc_nutricional.db"
 
-ORGANOS = [
-    "Cabello", "Piel", "Cara", "Uñas", "Ojos", "Labios",
-    "Dientes y Encías", "Lengua", "Esqueleto", "Tejido Subcutáneo",
+# Clinical Assessment of Nutritional Status score (Metcoff 1994). Cada uno de los
+# 9 signos se puntúa de 1 a 4; total 9-36. Malnutrición fetal si el total < 25.
+# Fuente: Martínez-Nadal S et al. An Pediatr (Barc). 2016;84(4):218-223, tabla 1.
+CANS_PUNTAJE_MALNUTRICION = 25
+CANS_SIGNOS = [
+    (
+        "Cabello",
+        "Calidad y docilidad del pelo",
+        {
+            4: "Abundante, cubre todo el cuero cabelludo. Se peina con facilidad",
+            3: "Moderada cantidad. Algunos lisos, se peina con facilidad",
+            2: "Escasa cantidad. Cabello liso, se peina con dificultad",
+            1: "Escasa cantidad, áreas sin pelo. Cabello liso, no se puede peinar",
+        },
+    ),
+    (
+        "Mejillas",
+        "Forma de la cara y adiposidad en los carrillos",
+        {
+            4: "Redonda. Abundante adiposidad",
+            3: "Cuadrada. Moderada adiposidad",
+            2: "Ovalada. Escasa adiposidad",
+            1: "Triangular. Sin adiposidad",
+        },
+    ),
+    (
+        "Barbilla y cuello",
+        "Perfil de la barbilla y el cuello",
+        {
+            4: "Pliegues adiposos doble o triple, sin cuello",
+            3: "Un solo pliegue. Se insinúa cuello sin arrugas",
+            2: "Sin pliegues. Cuello bien definido",
+            1: "Sin pliegues. Cuello con piel laxa y arrugas",
+        },
+    ),
+    (
+        "Brazos",
+        "Coger con ambas manos el brazo y el codo, mirando la zona del tríceps, "
+        "comprimir hacia el centro y observar arrugas",
+        {
+            4: "Sin arrugas",
+            3: "Escasas arrugas superficiales",
+            2: "3 a 5 arrugas gruesas",
+            1: "Arrugas en acordeón",
+        },
+    ),
+    (
+        "Tórax",
+        "Observar prominencias del tórax y espacio intercostal",
+        {
+            4: "Tórax lleno, no se aprecian las costillas",
+            3: "Se insinúan algunas costillas y leves espacios intercostales debajo de las mamilas",
+            2: "Se aprecian costillas y espacios intercostales debajo de las mamilas",
+            1: "Costillas prominentes con pérdida del tejido intercostal",
+        },
+    ),
+    (
+        "Pliegues de la pared abdominal",
+        "Observar adiposidad y consistencia de la piel",
+        {
+            4: "Abdomen lleno, redondo sin piel laxa",
+            3: "Abdomen plano sin piel laxa con uno o 2 pliegues en la región supraumbilical",
+            2: "Abdomen delgado. Pliegues en todo el abdomen",
+            1: "Abdomen distendido o excavado con piel laxa, fácil de levantar, pliegues en acordeón",
+        },
+    ),
+    (
+        "Espalda",
+        "Pinzar suavemente con el pulgar e índice la zona interescapular o subescapular "
+        "intentando elevar la piel y el tejido subcutáneo",
+        {
+            4: "Difícil de sujetar y elevar",
+            3: "Elevación de 5-10 mm. Pliegue grueso",
+            2: "Elevación de 10-20 mm. Pliegue delgado",
+            1: "Elevación > 20 mm. Pliegue delgado y laxo",
+        },
+    ),
+    (
+        "Glúteos",
+        "Observar glúteos y zona posterosuperior del muslo",
+        {
+            4: "Cojinetes adiposos redondos y llenos",
+            3: "Cojinetes aplanados, sin arrugas en glúteos ni muslos",
+            2: "Tejido subcutáneo delgado. Arrugas no profundas en glúteos y muslos",
+            1: "Tejido subcutáneo escaso, con piel laxa y arrugas profundas",
+        },
+    ),
+    (
+        "Piernas",
+        "Coger con ambas manos, mirando la región anterior de la pierna. Fijar el pie y "
+        "comprimir desde la rodilla con la finalidad de formar arrugas",
+        {
+            4: "Sin arrugas",
+            3: "Escasas arrugas y no profundas",
+            2: "3 a 5 arrugas gruesas",
+            1: "Múltiples arrugas en acordeón",
+        },
+    ),
 ]
+CANS_PUNTOS = (4, 3, 2, 1)
+CANS_MAXIMO = len(CANS_SIGNOS) * max(CANS_PUNTOS)
+CANS_MINIMO = len(CANS_SIGNOS) * min(CANS_PUNTOS)
+# Indice ponderal de Rohrer: IP = peso (g) x 100 / longitud^3 (cm). El articulo
+# considera malnutricion un IP < 2,2 g/cm3 (IP 2,3 = p10 e IP 2,2 = p3 de peso).
+IP_CORTE_MALNUTRICION = 2.2
+IP_P10 = 2.3
+IP_P3 = 2.2
+# Curva de indice ponderal segun edad gestacional (ambos sexos, semanas 33-42).
+# Caiza ME et al. An Pediatr (Barc) 2003;59(1):48-53, tabla 3 (p10/p50/p90).
+IP_REFERENCIA_EG = {
+    33: (2.29, 2.64, 3.05), 34: (2.34, 2.65, 3.03), 35: (2.34, 2.66, 3.06),
+    36: (2.39, 2.71, 3.05), 37: (2.40, 2.74, 3.10), 38: (2.45, 2.78, 3.14),
+    39: (2.49, 2.78, 3.16), 40: (2.50, 2.81, 3.16), 41: (2.50, 2.81, 3.17),
+    42: (2.52, 2.83, 3.17),
+}
+# Tabla 5 de Caiza et al. (2003): combinacion de IP (bajo/normal/elevado) y
+# P/EG (PEG/AEG/GEG) con su letra y definicion de patron de crecimiento.
+TABLA5_PATRONES = {
+    ("Bajo", "PEG"): ("A", "Retraso de crecimiento intrauterino asimétrico"),
+    ("Bajo", "AEG"): ("C", "Retraso de crecimiento intrauterino subclínico"),
+    ("Bajo", "GEG"): ("X", "Patrón extremadamente infrecuente"),
+    ("Normal", "PEG"): ("B", "Retraso de crecimiento intrauterino simétrico"),
+    ("Normal", "AEG"): ("N", "Normal"),
+    ("Normal", "GEG"): ("E", "Grande constitucional"),
+    ("Elevado", "PEG"): ("X", "Patrón extremadamente infrecuente"),
+    ("Elevado", "AEG"): ("D", "Baja talla genética (?)"),
+    ("Elevado", "GEG"): ("F", "Obesidad neonatal o hijo de madre con diabetes gestacional (?)"),
+}
 
 PRUEBAS = [
     ("Albúmina", "3.5-5.5 g/dl"),
@@ -1779,6 +1915,16 @@ class App(tk.Tk):
             conn.execute("ALTER TABLE visita_ganancia_peso ADD COLUMN velocidad_g_dia REAL")
         if "velocidad_percentil" not in columnas_visita:
             conn.execute("ALTER TABLE visita_ganancia_peso ADD COLUMN velocidad_percentil TEXT")
+        columnas_cans = [
+            fila[1] for fila in conn.execute("PRAGMA table_info(evaluacion_cans)")
+        ]
+        for nombre, tipo in (
+            ("indice_ponderal", "REAL"),
+            ("peso_nacer_g", "REAL"),
+            ("longitud_nacer_cm", "REAL"),
+        ):
+            if nombre not in columnas_cans:
+                conn.execute(f"ALTER TABLE evaluacion_cans ADD COLUMN {nombre} {tipo}")
         col_pac = [fila[1] for fila in conn.execute("PRAGMA table_info(paciente)")]
         if "nombre" not in col_pac:
             conn.execute("ALTER TABLE paciente ADD COLUMN nombre TEXT")
@@ -2028,7 +2174,7 @@ class App(tk.Tk):
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
         self._tab_antecedentes()
-        self._tab_signos()
+        self._tab_cans()
         self._tab_farmaco()
         self._tab_bioquimica()
 
@@ -2214,6 +2360,8 @@ class App(tk.Tk):
         ttk.Button(marco_clas, text="Clasificar", command=self._clasificar).grid(row=2, column=0, sticky="w", padx=5, pady=4)
         self.clas_resultado = tk.Label(marco_clas, text="", justify="left", foreground="blue", wraplength=700)
         self.clas_resultado.grid(row=3, column=0, columnspan=4, sticky="w", padx=5, pady=4)
+        self.ant["edad_gestacional"].trace_add("write", self._clasificar_peso_nacer)
+        self.sexo_nacer.trace_add("write", self._clasificar_peso_nacer)
 
         ttk.Separator(marco_clas, orient="horizontal").grid(row=4, column=0, columnspan=4, sticky="ew", padx=5, pady=6)
         self.peso_actual_label = ttk.Label(marco_clas, text="Peso actual (g o kg):")
@@ -2399,25 +2547,6 @@ class App(tk.Tk):
         self.campos["fecha_actual"].trace_add("write", self._actualizar_unidad_edad_velocidad)
         self._actualizar_unidad_edad_velocidad()
 
-    # ---------- Pestaña 2 Signos Clínicos ----------
-    def _tab_signos(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="2. Signos Clínicos")
-
-        barra = ttk.Frame(tab)
-        barra.pack(fill="x", padx=8, pady=4)
-        ttk.Label(barra, text="Signos Clínicos:").pack(side="left", padx=5)
-        ttk.Button(barra, text="Guardar", command=self._guardar_signos).pack(side="left", padx=3)
-        ttk.Button(barra, text="Editar", command=self._editar_signos).pack(side="left", padx=3)
-
-        self.signos_tree = self._crear_grid(
-            tab,
-            ["Órgano / Signo", "Signo Clínico", "Probable Alteración Nutricional"],
-            alturas=12,
-        )
-        for organo in ORGANOS:
-            self.signos_tree.insert("", "end", values=(organo, "", ""))
-
     # ---------- Pestaña 3 Interacción Fármaco-Nutriente ----------
     def _tab_farmaco(self):
         tab = ttk.Frame(self.notebook)
@@ -2460,6 +2589,118 @@ class App(tk.Tk):
         for prueba, valor in PRUEBAS:
             self.bio_tree.insert("", "end", values=(prueba, valor, ""))
 
+    # ---------- Pestaña 2 Signos Clínicos (CANS score) ----------
+    def _tab_cans(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="2. Signos Clínicos (CANS)")
+        self._tab_signos = tab
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="CANS Score:").pack(side="left", padx=5)
+        ttk.Button(barra, text="Guardar", command=self._guardar_cans).pack(side="left", padx=3)
+        ttk.Button(barra, text="Editar", command=self._editar_cans).pack(side="left", padx=3)
+        ttk.Button(barra, text="Limpiar", command=self._limpiar_cans).pack(side="left", padx=3)
+        ttk.Button(barra, text="Guardar en Excel", command=self._exportar_cans_xls).pack(side="left", padx=3)
+
+        marco_fecha = ttk.LabelFrame(tab, text="Datos de la valoración")
+        marco_fecha.pack(fill="x", padx=8, pady=4)
+        ttk.Label(marco_fecha, text="Fecha de la valoración:").grid(
+            row=0, column=0, sticky="e", padx=5, pady=4)
+        self.cans_fecha = tk.StringVar(value=date.today().isoformat())
+        ttk.Entry(marco_fecha, textvariable=self.cans_fecha, width=14).grid(
+            row=0, column=1, sticky="w", padx=5, pady=4)
+        ttk.Label(marco_fecha, text="Observaciones:").grid(
+            row=0, column=2, sticky="e", padx=5, pady=4)
+        self.cans_observaciones = tk.Text(marco_fecha, width=52, height=3)
+        self.cans_observaciones.grid(row=0, column=3, sticky="w", padx=5, pady=4)
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._canvas_cans = canvas
+
+        def _actualizar_scroll(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _ancho_scroll(_event=None):
+            canvas.itemconfigure(ventana, width=_event.width)
+
+        def _rueda(_event):
+            canvas.yview_scroll(int(-_event.delta / 120), "units")
+
+        def _cambio_tab(_event=None):
+            if self.notebook.select() == tab:
+                canvas.bind_all("<MouseWheel>", _rueda)
+            else:
+                canvas.unbind_all("<MouseWheel>")
+
+        interior.bind("<Configure>", _actualizar_scroll)
+        canvas.bind("<Configure>", _ancho_scroll)
+        self.notebook.bind("<<NotebookTabChanged>>", _cambio_tab)
+        tab.bind("<Map>", _cambio_tab)
+        tab.bind("<Unmap>", _cambio_tab)
+        tab.bind("<Destroy>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        self.cans_vars = {}
+        for nombre, tecnica, opciones in CANS_SIGNOS:
+            marco = ttk.LabelFrame(interior, text=f"{nombre} — {tecnica}")
+            marco.pack(fill="x", padx=8, pady=4)
+            fila = ttk.Frame(marco)
+            fila.pack(fill="x", padx=5, pady=3)
+            variable = tk.IntVar(value=max(CANS_PUNTOS))
+            self.cans_vars[nombre] = variable
+            for puntos in CANS_PUNTOS:
+                ttk.Radiobutton(
+                    fila,
+                    text=f"{puntos}  ·  {opciones[puntos]}",
+                    value=puntos,
+                    variable=variable,
+                    command=self._recalcular_cans,
+                ).pack(anchor="w", pady=1)
+
+        marco_total = ttk.LabelFrame(interior, text="Resultado CANS score")
+        marco_total.pack(fill="x", padx=8, pady=6)
+        self.cans_total_label = tk.Label(
+            marco_total, text="", justify="left", font=("TkDefaultFont", 11, "bold"),
+            foreground="#1E6E5C", wraplength=860)
+        self.cans_total_label.pack(anchor="w", padx=8, pady=6)
+        self.cans_detalle_label = tk.Label(
+            marco_total, text="", justify="left", foreground="#555555", wraplength=860)
+        self.cans_detalle_label.pack(anchor="w", padx=8, pady=(0, 6))
+
+        marco_ip = ttk.LabelFrame(tab, text="Índice ponderal de Rohrer")
+        marco_ip.pack(fill="x", padx=8, pady=6)
+        self.ip_label = tk.Label(
+            marco_ip, text="", justify="left", font=("TkDefaultFont", 11, "bold"),
+            foreground="#555555", wraplength=860)
+        self.ip_label.pack(anchor="w", padx=8, pady=6)
+        self.ip_nota_label = tk.Label(
+            marco_ip, text="", justify="left", foreground="#555555", wraplength=860)
+        self.ip_nota_label.pack(anchor="w", padx=8, pady=(0, 6))
+        ttk.Label(
+            marco_ip,
+            text="IP = peso al nacer (g) × 100 / longitud al nacer (cm)³  ·  "
+                 "toma los datos de '1. Antropometría' → Antecedentes Prenatales",
+            foreground="#555555",
+        ).pack(anchor="w", padx=8, pady=(0, 6))
+        self.ip_patron_label = tk.Label(
+            marco_ip, text="", justify="left", font=("TkDefaultFont", 10, "bold"),
+            foreground="#1E6E5C", wraplength=860)
+        self.ip_patron_label.pack(anchor="w", padx=8, pady=(0, 8))
+        self._recalcular_cans()
+        self._recalcular_ip()
+        for clave in ("peso_nacer", "longitud_nacer"):
+            variable = self.ant.get(clave)
+            if variable is not None:
+                variable.trace_add("write", lambda *_: self._recalcular_ip())
+
     # ---------- Acciones ----------
     def _parsedias_desde_nacimiento(self):
         texto = self.campos["fecha_nacimiento"].get().strip()
@@ -2491,6 +2732,7 @@ class App(tk.Tk):
             self.clas_peso_g.set(str(gramos))
         except ValueError:
             self.clas_peso_g.set("")
+        self._clasificar_peso_nacer()
 
     def _calcular_edad(self):
         dias = self._parsedias_desde_nacimiento()
@@ -2501,17 +2743,34 @@ class App(tk.Tk):
         self.campos["edad"].set(f"{semanas} semanas y {resto} días")
 
     def _clasificar(self):
+        self._clasificar_peso_nacer(silencioso=False)
+
+    def _clasificar_peso_nacer(self, *args, silencioso=True):
+        """Clasifica el peso al nacer contra la referencia de la semana de
+        gestación del paciente. Silencioso por defecto: se invoca automáticamente
+        al cambiar la EG, el sexo o el peso."""
+        def _aviso(titulo, mensaje):
+            self._clasificacion = ""
+            self._codigo_peso_eg = ""
+            self.clas_peso_ok = False
+            if not silencioso:
+                messagebox.showwarning(titulo, mensaje)
+            elif hasattr(self, "clas_resultado"):
+                self.clas_resultado.config(text=mensaje, foreground="#8B4513")
+            if hasattr(self, "ip_patron_label"):
+                self._clasificar_patron_crecimiento()
+
         try:
             semanas = int(re.match(r"\d+", self.ant["edad_gestacional"].get().strip()).group())
         except (AttributeError, ValueError):
-            messagebox.showwarning("Clasificación", "Ingrese la edad gestacional en semanas (ej.: 39)")
+            _aviso("Clasificación", "Ingrese la edad gestacional en semanas (ej.: 39)")
             return
         try:
             peso = float(self.ant["peso_nacer"].get().replace(",", ".").strip())
             if peso < 10:
                 peso *= 1000
         except ValueError:
-            messagebox.showwarning("Clasificación", "Ingrese el peso al nacer (en kg en Antecedentes Prenatales)")
+            _aviso("Clasificación", "Ingrese el peso al nacer (en kg en Antecedentes Prenatales)")
             return
         sexo = self.sexo_nacer.get()
         conn = conectar()
@@ -2521,24 +2780,37 @@ class App(tk.Tk):
         ).fetchone()
         conn.close()
         if fila is None:
-            messagebox.showwarning("Clasificación", f"No hay referencia para la semana {semanas} ({sexo})")
+            _aviso("Clasificación", f"No hay referencia para la semana {semanas} ({sexo})")
             return
         p10, p50, p90 = fila
         if peso < p10:
             codigo = "PEG"
             texto = "Pequeño para la Edad de Gestación"
+            ubicacion = f"por debajo del P10 ({int(p10)} g)"
         elif peso <= p90:
             codigo = "AEG"
             texto = "Apropiado para la Edad de Gestación"
+            ubicacion = f"entre P10 ({int(p10)} g) y P90 ({int(p90)} g)"
         else:
             codigo = "GEG"
             texto = "Grande para la Edad de Gestación"
+            ubicacion = f"por encima del P90 ({int(p90)} g)"
         self._clasificacion = f"{codigo} - {texto}"
+        self._codigo_peso_eg = codigo
         self.clas_peso_ok = True
+        diferencia = peso - p50
+        porcentaje = diferencia / p50 * 100.0 if p50 else 0.0
         self.clas_resultado.config(
-            text=f"P10: {int(p10)} g | P50: {int(p50)} g | P90: {int(p90)} g\n"
-                 f"Peso: {int(peso)} g --> {codigo}: {texto}"
+            text=(
+                f"Peso: {int(peso)} g  |  EG: {semanas} semanas  |  Sexo: {sexo}\n"
+                f"Referencia {semanas} sem: P10 {int(p10)} g | P50 {int(p50)} g | P90 {int(p90)} g\n"
+                f"{codigo}: {texto} ({ubicacion})\n"
+                f"Respecto al P50: {diferencia:+.0f} g ({porcentaje:+.1f} %)"
+            ),
+            foreground="blue" if codigo == "AEG" else "#B00020",
         )
+        if hasattr(self, "ip_patron_label"):
+            self._clasificar_patron_crecimiento()
 
     def _valorar_ganancia(self):
         self.velocidad_neonatal_resultado.config(text="")
@@ -3146,6 +3418,333 @@ class App(tk.Tk):
             return False
         return True
 
+    # ---------- CANS Score ----------
+    def _cans_datos(self):
+        """Puntuación elegida por signo, en el orden de CANS_SIGNOS."""
+        return [(nombre, int(self.cans_vars[nombre].get())) for nombre, _, _ in CANS_SIGNOS]
+
+    def _cans_total(self):
+        return sum(puntos for _, puntos in self._cans_datos())
+
+    def _cans_interpretacion(self, total):
+        if total < CANS_PUNTAJE_MALNUTRICION:
+            return (
+                True,
+                f"MALNUTRICIÓN FETAL: CANS score {total} (< {CANS_PUNTAJE_MALNUTRICION})",
+            )
+        return False, f"Nutrición adecuada: CANS score {total} (>= {CANS_PUNTAJE_MALNUTRICION})"
+
+    def _recalcular_cans(self):
+        total = self._cans_total()
+        malnutricion, interpretacion = self._cans_interpretacion(total)
+        color = "#B00020" if malnutricion else "#1E6E5C"
+        self.cans_total_label.config(
+            text=f"CANS score: {total} / {CANS_MAXIMO}   |   {interpretacion}",
+            foreground=color,
+        )
+        marcados = [f"{n}: {p}" for n, p in self._cans_datos() if p < max(CANS_PUNTOS)]
+        self.cans_detalle_label.config(
+            text="Signos con puntuación < 4: " + (", ".join(marcados) if marcados else "ninguno"),
+            foreground=color if marcados else "#555555",
+        )
+
+    def _cans_observaciones(self):
+        return self.cans_observaciones.get("1.0", "end").strip()
+
+    def _indice_ponderal(self):
+        """Índice ponderal de Rohrer: IP = peso (g) × 100 / longitud (cm)³.
+        Devuelve (ip, peso_g, longitud_cm, error)."""
+        def _numero(clave, maximo):
+            texto = self.ant.get(clave, tk.StringVar()).get().strip().replace(",", ".")
+            if not texto:
+                return None
+            try:
+                valor = float(texto)
+            except ValueError:
+                return None
+            if valor <= 0 or valor > maximo:
+                return None
+            return valor
+
+        peso = _numero("peso_nacer", 10000)
+        if peso is None:
+            return None, None, None, "Peso al nacer no válido o vacío (máx. 10000)."
+        if peso < 10:
+            peso *= 1000
+        longitud = _numero("longitud_nacer", 100)
+        if longitud is None:
+            return None, peso, None, "Longitud al nacer no válida o vacía (máx. 100 cm)."
+        return peso * 100.0 / (longitud ** 3), peso, longitud, ""
+
+    def _recalcular_ip(self):
+        ip, peso, longitud, error = self._indice_ponderal()
+        if error:
+            self.ip_label.config(text=f"No se pudo calcular el índice ponderal: {error}", foreground="#8B4513")
+            self.ip_nota_label.config(text="")
+            self._clasificar_patron_crecimiento()
+            return None
+        malnutricion = ip < IP_CORTE_MALNUTRICION
+        self.ip_label.config(
+            text=f"Índice ponderal: {ip:.2f} g/cm³   |   "
+                 + ("MALNUTRICIÓN: IP < 2,2" if malnutricion else "Sin malnutrición por IP"),
+            foreground="#B00020" if malnutricion else "#1E6E5C",
+        )
+        self.ip_nota_label.config(
+            text=f"Peso {peso:.0f} g, longitud {longitud:.1f} cm  ·  "
+                 f"IP 2,3 = p10 e IP 2,2 = p3 de peso; < {IP_CORTE_MALNUTRICION} se considera "
+                 f"malnutrición (PEG tipo II, asimétrico)."
+        )
+        self._clasificar_patron_crecimiento()
+        return ip
+
+    def _clasificar_patron_crecimiento(self, *args):
+        """Tabla 5 de Caiza et al. (2003): combina el IP (bajo/normal/elevado
+        segun la curva por EG) con la clasificacion P/EG (PEG/AEG/GEG) para
+        definir el patron de crecimiento intrauterino (A-F/N/X)."""
+        if not hasattr(self, "ip_patron_label"):
+            return
+        try:
+            semanas = int(re.match(r"\d+", self.ant["edad_gestacional"].get().strip()).group())
+        except (AttributeError, ValueError):
+            semanas = None
+        codigo_eg = getattr(self, "_codigo_peso_eg", "")
+        ip, _peso, _longitud, _error = self._indice_ponderal()
+        if semanas is None or not codigo_eg or ip is None:
+            self.ip_patron_label.config(
+                text="Patrón de crecimiento (Tabla 5 Caiza 2003): requiere la clasificación "
+                     "del peso por EG (pestaña '1. Antropometría') y el índice ponderal.",
+                foreground="#8B4513")
+            return
+        referencia = IP_REFERENCIA_EG.get(semanas)
+        if referencia is None:
+            self.ip_patron_label.config(
+                text=f"Patrón de crecimiento (Tabla 5): la curva de IP solo cubre "
+                     f"33-42 semanas (recibida: {semanas}).",
+                foreground="#8B4513")
+            return
+        p10, _p50, p90 = referencia
+        if ip < p10:
+            cat_ip = "Bajo"
+        elif ip <= p90:
+            cat_ip = "Normal"
+        else:
+            cat_ip = "Elevado"
+        letra, descripcion = TABLA5_PATRONES[(cat_ip, codigo_eg)]
+        self.ip_patron_label.config(
+            text=f"Patrón de crecimiento (Tabla 5 Caiza 2003): {letra} — {descripcion}\n"
+                 f"IP {ip:.2f} = {cat_ip} (ref. {semanas} sem: P10 {p10:.2f} · P90 {p90:.2f})  ·  "
+                 f"P/EG: {codigo_eg}",
+            foreground="#1E6E5C" if letra == "N" else "#B00020",
+        )
+
+    def _limpiar_cans(self):
+        for variable in self.cans_vars.values():
+            variable.set(max(CANS_PUNTOS))
+        self.cans_observaciones.delete("1.0", "end")
+        self.cans_fecha.set(date.today().isoformat())
+        self._recalcular_cans()
+        self.status.config(text="CANS score reiniciado")
+
+    def _guardar_cans(self):
+        if not self._exigir_paciente():
+            return
+        total = self._cans_total()
+        malnutricion, interpretacion = self._cans_interpretacion(total)
+        datos = self._cans_datos()
+        conn = conectar()
+        try:
+            anterior = conn.execute(
+                "SELECT id FROM evaluacion_cans WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,),
+            ).fetchone()
+            scores_json = json.dumps(datos, ensure_ascii=False)
+            eg = self.ant.get("edad_gestacional", tk.StringVar()).get().strip()
+            ip, peso_nacer, longitud_nacer, _error_ip = self._indice_ponderal()
+            valores = (
+                self.cans_fecha.get().strip(), eg, total, 1 if malnutricion else 0,
+                interpretacion, scores_json, self._cans_observaciones(),
+                ip, peso_nacer, longitud_nacer,
+            )
+            if anterior:
+                conn.execute(
+                    """UPDATE evaluacion_cans
+                       SET fecha_evaluacion=?, edad_gestacional=?, total=?,
+                           malnutricion_fetal=?, interpretacion=?, scores_json=?,
+                           observaciones=?, indice_ponderal=?, peso_nacer_g=?,
+                           longitud_nacer_cm=?
+                       WHERE id=?""",
+                    (*valores, anterior[0]),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO evaluacion_cans
+                       (paciente_id, fecha_evaluacion, edad_gestacional, total,
+                        malnutricion_fetal, interpretacion, scores_json, observaciones,
+                        indice_ponderal, peso_nacer_g, longitud_nacer_cm)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (self._paciente_id, *valores),
+                )
+            conn.commit()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        finally:
+            conn.close()
+        self.status.config(
+            text=f"CANS score guardado ({total}/{CANS_MAXIMO}) | Paciente N° {self._paciente_id}")
+
+    def _editar_cans(self, silencioso=False):
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        fila = conn.execute(
+            """SELECT fecha_evaluacion, edad_gestacional, total, malnutricion_fetal,
+                      interpretacion, scores_json, observaciones
+               FROM evaluacion_cans WHERE paciente_id = ? ORDER BY id DESC LIMIT 1""",
+            (self._paciente_id,),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay un CANS score guardado para este paciente")
+            return
+        fecha, eg, total, _malnutricion, interpretacion, scores_json, observaciones = fila
+        self.cans_fecha.set(fecha or date.today().isoformat())
+        self.cans_observaciones.delete("1.0", "end")
+        if observaciones:
+            self.cans_observaciones.insert("1.0", observaciones)
+        try:
+            guardado = {nombre: puntos for nombre, puntos in json.loads(scores_json or "[]")}
+        except (TypeError, ValueError):
+            guardado = {}
+        for nombre, variable in self.cans_vars.items():
+            if nombre in guardado:
+                variable.set(int(guardado[nombre]))
+        self._recalcular_cans()
+        self.status.config(
+            text=f"Editando CANS score ({interpretacion}) | Paciente N° {self._paciente_id}")
+
+    def _exportar_cans_xls(self):
+        if not OPENPYXL_OK:
+            messagebox.showwarning(
+                "Excel", "El paquete 'openpyxl' no está instalado.\nInstálelo con:  pip install openpyxl")
+            return
+        total = self._cans_total()
+        malnutricion, interpretacion = self._cans_interpretacion(total)
+        sugerencia = f"CANS_{date.today().isoformat()}.xlsx"
+        ruta = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar CANS score en Excel",
+            initialfile=sugerencia,
+            defaultextension=".xlsx",
+            filetypes=[("Libro de Excel", "*.xlsx")],
+        )
+        if not ruta:
+            return
+        libro = _XlsxWorkbook()
+        hoja = libro.active
+        hoja.title = "CANS score"
+        titulo = _XlsxFont(bold=True, size=14)
+        encabezado = _XlsxFont(bold=True, color="FFFFFF")
+        relleno = _XlsxFill("solid", fgColor="1E6E5C")
+        centrado = _XlsxAlignment(horizontal="center", vertical="center", wrap_text=True)
+        hoja["A1"] = "Clinical Assessment of Nutritional Status (CANS) score"
+        hoja["A1"].font = titulo
+        hoja["A2"] = "Paciente"
+        hoja["B2"] = self.campos["nombre"].get().strip() or "-"
+        hoja["A3"] = "Fecha"
+        hoja["B3"] = self.cans_fecha.get().strip()
+        hoja["A4"] = "Edad gestacional"
+        hoja["B4"] = self.ant.get("edad_gestacional", tk.StringVar()).get().strip()
+        fila_tabla = 6
+        encabezados = ["N°", "Signo", "Técnica", "Puntos", "Descripción del signo seleccionado"]
+        for columna, texto in enumerate(encabezados, start=1):
+            celda = hoja.cell(row=fila_tabla, column=columna, value=texto)
+            celda.font = encabezado
+            celda.fill = relleno
+            celda.alignment = centrado
+        fila = fila_tabla
+        for numero, (nombre, tecnica, opciones) in enumerate(CANS_SIGNOS, start=1):
+            puntos = int(self.cans_vars[nombre].get())
+            fila += 1
+            hoja.cell(row=fila, column=1, value=numero)
+            hoja.cell(row=fila, column=2, value=nombre)
+            hoja.cell(row=fila, column=3, value=tecnica)
+            hoja.cell(row=fila, column=4, value=puntos)
+            hoja.cell(row=fila, column=5, value=opciones[puntos])
+        fila += 1
+        hoja.cell(row=fila, column=3, value="TOTAL").font = _XlsxFont(bold=True)
+        celda_total = hoja.cell(row=fila, column=4, value=total)
+        celda_total.font = _XlsxFont(bold=True)
+        hoja.cell(row=fila, column=5, value=interpretacion)
+        fila += 2
+        hoja.cell(row=fila, column=1, value="Rango posible").font = _XlsxFont(bold=True)
+        hoja.cell(row=fila, column=2, value=f"{CANS_MINIMO}-{CANS_MAXIMO} puntos")
+        fila += 1
+        hoja.cell(row=fila, column=1, value="Punto de corte").font = _XlsxFont(bold=True)
+        hoja.cell(
+            row=fila, column=2,
+            value=f"Malnutrición fetal si CANS score < {CANS_PUNTAJE_MALNUTRICION}",
+        )
+        fila += 1
+        hoja.cell(row=fila, column=1, value="Clasificación").font = _XlsxFont(bold=True)
+        hoja.cell(row=fila, column=2, value="MALNUTRICIÓN FETAL" if malnutricion else "NUTRICIÓN ADECUADA")
+        fila += 1
+        hoja.cell(row=fila, column=1, value="Observaciones").font = _XlsxFont(bold=True)
+        hoja.cell(row=fila, column=2, value=self._cans_observaciones())
+        fila += 2
+        hoja.cell(row=fila, column=1, value="ÍNDICE PONDERAL DE ROHRER").font = titulo
+        fila += 1
+        ip, peso_nacer, longitud_nacer, error_ip = self._indice_ponderal()
+        if error_ip:
+            hoja.cell(row=fila, column=1, value=f"No se pudo calcular: {error_ip}")
+        else:
+            hoja.cell(row=fila, column=1, value="Fórmula").font = _XlsxFont(bold=True)
+            hoja.cell(row=fila, column=2, value="IP = peso (g) × 100 / longitud (cm)³")
+            fila += 1
+            hoja.cell(row=fila, column=1, value="Peso al nacer").font = _XlsxFont(bold=True)
+            hoja.cell(row=fila, column=2, value=f"{peso_nacer:.0f} g")
+            fila += 1
+            hoja.cell(row=fila, column=1, value="Longitud al nacer").font = _XlsxFont(bold=True)
+            hoja.cell(row=fila, column=2, value=f"{longitud_nacer:.1f} cm")
+            fila += 1
+            celda_ip = hoja.cell(row=fila, column=1, value="Índice ponderal")
+            celda_ip.font = _XlsxFont(bold=True)
+            hoja.cell(row=fila, column=2, value=f"{ip:.2f} g/cm³")
+            fila += 1
+            hoja.cell(row=fila, column=1, value="Punto de corte").font = _XlsxFont(bold=True)
+            hoja.cell(
+                row=fila, column=2,
+                value=f"Malnutrición si IP < {IP_CORTE_MALNUTRICION} g/cm³ "
+                      f"(IP {IP_P10} = p10, IP {IP_P3} = p3)",
+            )
+            fila += 1
+            hoja.cell(row=fila, column=1, value="Clasificación por IP").font = _XlsxFont(bold=True)
+            hoja.cell(
+                row=fila, column=2,
+                value=("MALNUTRICIÓN (PEG tipo II, asimétrico)"
+                       if ip < IP_CORTE_MALNUTRICION else "Sin malnutrición por IP"),
+            )
+        fila += 2
+        hoja.cell(
+            row=fila, column=1,
+            value="Fuente: Metcoff 1994. Martínez-Nadal S et al. "
+                  "An Pediatr (Barc). 2016;84(4):218-223, tabla 1.",
+        )
+        for columna, ancho in enumerate((6, 32, 58, 9, 72), start=1):
+            hoja.column_dimensions[_xlsx_col(columna)].width = ancho
+        hoja.freeze_panes = hoja.cell(row=fila_tabla + 1, column=1)
+        try:
+            libro.save(ruta)
+        except PermissionError:
+            messagebox.showerror(
+                "Excel", f"No se pudo escribir en:\n{ruta}\n\nCierre el archivo si está abierto en Excel.")
+            return
+        except Exception as e:
+            messagebox.showerror("Excel", str(e))
+            return
+        self.status.config(text=f"CANS score exportado a {ruta}")
+
     def _datos_paciente(self):
         return (
             self.campos["nombre"].get(), self.campos["servicio"].get(),
@@ -3324,10 +3923,6 @@ class App(tk.Tk):
         self._consulta_id = None
         for item in self.visita_tree.get_children():
             self.visita_tree.delete(item)
-        for item in self.signos_tree.get_children():
-            self.signos_tree.delete(item)
-        for organo in ORGANOS:
-            self.signos_tree.insert("", "end", values=(organo, "", ""))
         for item in self.farmaco_tree.get_children():
             self.farmaco_tree.delete(item)
         for item in self.bio_tree.get_children():
@@ -3680,51 +4275,6 @@ class App(tk.Tk):
         self.ganancia_resultado.config(text=self._valoracion_ganancia)
         self.velocidad_neonatal_resultado.config(text=self._valoracion_velocidad)
 
-    def _guardar_signos(self):
-        if not self._exigir_paciente():
-            return
-        try:
-            conn = conectar()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM signos_clinicos WHERE paciente_id = ?", (self._paciente_id,))
-            for item in self.signos_tree.get_children():
-                signo, hallazgo, alteracion = self.signos_tree.item(item, "values")
-                if hallazgo or alteracion:
-                    cur.execute(
-                        "INSERT INTO signos_clinicos (paciente_id, signo, signo_clinico, probable_alteracion) VALUES (?,?,?,?)",
-                        (self._paciente_id, signo, hallazgo, alteracion),
-                    )
-            conn.commit()
-            conn.close()
-            self.status.config(text=f"Signos clínicos guardados | Paciente N° {self._paciente_id}")
-            messagebox.showinfo("Guardado", "Signos clínicos guardados")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    def _editar_signos(self, silencioso=False):
-        if silencioso and not getattr(self, "_paciente_id", None):
-            return
-        if not self._exigir_paciente():
-            return
-        conn = conectar()
-        filas = conn.execute(
-            "SELECT signo, signo_clinico, probable_alteracion FROM signos_clinicos WHERE paciente_id = ? ORDER BY id",
-            (self._paciente_id,),
-        ).fetchall()
-        conn.close()
-        for item in self.signos_tree.get_children():
-            self.signos_tree.delete(item)
-        for organo in ORGANOS:
-            self.signos_tree.insert("", "end", values=(organo, "", ""))
-        for i, item in enumerate(self.signos_tree.get_children()):
-            if i < len(filas):
-                self.signos_tree.item(item, values=(filas[i][0], filas[i][1] or "", filas[i][2] or ""))
-        if not filas:
-            if not silencioso:
-                messagebox.showinfo("Editar", "No hay signos clínicos guardados para este paciente")
-        else:
-            self.status.config(text=f"Editando signos clínicos | Paciente N° {self._paciente_id}")
-
     def _guardar_farmaco(self):
         if not self._exigir_paciente():
             return
@@ -3812,11 +4362,11 @@ class App(tk.Tk):
 
     def _cargar_ultimos_datos(self):
         self._editar_antecedentes(silencioso=True)
-        self._editar_signos(silencioso=True)
+        self._editar_cans(silencioso=True)
         self._editar_farmaco(silencioso=True)
         self._editar_bioquimica(silencioso=True)
         self.status.config(
-            text=f"Datos de antecedentes, signos, fármacos y bioquímica cargados | Paciente N° {self._paciente_id}"
+            text=f"Datos de antecedentes, signos clínicos, fármacos y bioquímica cargados | Paciente N° {self._paciente_id}"
         )
 
 if __name__ == "__main__":
