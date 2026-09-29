@@ -169,6 +169,31 @@ TABLA5_PATRONES = {
     ("Elevado", "GEG"): ("F", "Obesidad neonatal o hijo de madre con diabetes gestacional (?)"),
 }
 
+# Desarrollo motor grueso OMS-MGRS: seis hitos evaluados desde los 4 meses
+# hasta caminar solo. Fuente: WHO Multicentre Growth Reference Study Group.
+# WHO Motor Development Study. Acta Paediatr Suppl. 2006;450:86-95.
+DESARROLLO_MOTOR_HITOS = [
+    "Sentarse sin apoyo",
+    "Pararse con apoyo",
+    "Gatear en manos y rodillas",
+    "Caminar con apoyo",
+    "Pararse solo",
+    "Caminar solo",
+]
+DESARROLLO_MOTOR_PCT_REFERENCIA = (3, 50, 97)
+DESARROLLO_MOTOR_DEFINICIONES = {
+    "Sentarse sin apoyo": "Sentarse erguido con la cabeza derecha sin apoyarse en brazos, "
+                          "manos, tronco ni otro soporte, durante al menos 10 segundos.",
+    "Pararse con apoyo": "Pararse erguido sosteniéndose de un objeto fijo o de una persona, "
+                         "durante al menos 10 segundos.",
+    "Gatear en manos y rodillas": "Desplazarse en cuadrupedia (manos y rodillas) "
+                                  "al menos 2 veces seguidas con el tronco elevado.",
+    "Caminar con apoyo": "Caminar erguido sosteniéndose de un objeto fijo o de una persona, "
+                         "dando al menos 5 pasos con apoyo.",
+    "Pararse solo": "Pararse erguido sin apoyo alguno durante al menos 10 segundos.",
+    "Caminar solo": "Caminar sin apoyo durante al menos 5 pasos, con los brazos libres.",
+}
+
 PRUEBAS = [
     ("Albúmina", "3.5-5.5 g/dl"),
     ("Pre-albúmina", ">18 mg/dl"),
@@ -920,6 +945,74 @@ talla,M,6,15,21,0.9027,5.9431,0.1661,0.0
 talla,M,6,16,22,0.9027,5.7899,0.16861,0.0
 talla,M,6,17,23,0.9027,5.6425,0.17124,0.0
 talla,M,6,18,24,0.9027,5.5018,0.17392,0.0""",
+    "tabla_desarrollo_motor_oms.csv": """hito,percentil,edad_dias
+Sentarse sin apoyo,1,115
+Sentarse sin apoyo,3,125
+Sentarse sin apoyo,5,131
+Sentarse sin apoyo,10,140
+Sentarse sin apoyo,25,158
+Sentarse sin apoyo,50,179
+Sentarse sin apoyo,75,204
+Sentarse sin apoyo,90,229
+Sentarse sin apoyo,95,245
+Sentarse sin apoyo,97,256
+Sentarse sin apoyo,99,279
+Pararse con apoyo,1,147
+Pararse con apoyo,3,160
+Pararse con apoyo,5,167
+Pararse con apoyo,10,178
+Pararse con apoyo,25,200
+Pararse con apoyo,50,226
+Pararse con apoyo,75,256
+Pararse con apoyo,90,287
+Pararse con apoyo,95,307
+Pararse con apoyo,97,320
+Pararse con apoyo,99,348
+Gatear en manos y rodillas,1,157
+Gatear en manos y rodillas,3,177
+Gatear en manos y rodillas,5,187
+Gatear en manos y rodillas,10,202
+Gatear en manos y rodillas,25,226
+Gatear en manos y rodillas,50,254
+Gatear en manos y rodillas,75,284
+Gatear en manos y rodillas,90,319
+Gatear en manos y rodillas,95,345
+Gatear en manos y rodillas,97,364
+Gatear en manos y rodillas,99,409
+Caminar con apoyo,1,181
+Caminar con apoyo,3,200
+Caminar con apoyo,5,210
+Caminar con apoyo,10,225
+Caminar con apoyo,25,249
+Caminar con apoyo,50,275
+Caminar con apoyo,75,304
+Caminar con apoyo,90,336
+Caminar con apoyo,95,360
+Caminar con apoyo,97,378
+Caminar con apoyo,99,418
+Pararse solo,1,211
+Pararse solo,3,235
+Pararse solo,5,248
+Pararse solo,10,266
+Pararse solo,25,296
+Pararse solo,50,330
+Pararse solo,75,367
+Pararse solo,90,408
+Pararse solo,95,438
+Pararse solo,97,461
+Pararse solo,99,514
+Caminar solo,1,250
+Caminar solo,3,274
+Caminar solo,5,286
+Caminar solo,10,304
+Caminar solo,25,333
+Caminar solo,50,365
+Caminar solo,75,400
+Caminar solo,90,438
+Caminar solo,95,466
+Caminar solo,97,487
+Caminar solo,99,534
+""",
 }
 
 
@@ -1950,7 +2043,7 @@ class App(tk.Tk):
             "ninos.csv", "ninas.csv", "clasificaciones.csv", "ECRN_ninos.csv", "ECRN_ninas.csv",
             "ECRN_velocidad_ninos.csv", "ECRN_velocidad_ninas.csv",
             "tabla_peso_para_la_edad.csv", "tabla_velocidad_crecimiento.csv",
-            "tabla_velocidad_oms.csv",
+            "tabla_velocidad_oms.csv", "tabla_desarrollo_motor_oms.csv",
         ]))
         for nombre in nombres:
             if conn.execute("SELECT 1 FROM archivo_csv WHERE nombre = ?", (nombre,)).fetchone():
@@ -2166,6 +2259,15 @@ class App(tk.Tk):
                         float(fila["L"]), float(fila["M"]), float(fila["S"]),
                         float(fila["delta"]),
                     ),
+                )
+        if conn.execute("SELECT COUNT(*) FROM referencia_desarrollo_motor").fetchone()[0] == 0:
+            contenido = conn.execute(
+                "SELECT contenido FROM archivo_csv WHERE nombre = 'tabla_desarrollo_motor_oms.csv'"
+            ).fetchone()[0]
+            for fila in csv.DictReader(io.StringIO(contenido)):
+                conn.execute(
+                    "INSERT OR REPLACE INTO referencia_desarrollo_motor (hito, percentil, edad_dias) VALUES (?,?,?)",
+                    (fila["hito"].strip(), int(fila["percentil"]), int(fila["edad_dias"])),
                 )
         conn.commit()
 
@@ -2675,8 +2777,7 @@ class App(tk.Tk):
             marco_total, text="", justify="left", foreground="#555555", wraplength=860)
         self.cans_detalle_label.pack(anchor="w", padx=8, pady=(0, 6))
 
-        marco_ip = ttk.LabelFrame(tab, text="Índice ponderal de Rohrer")
-        marco_ip.pack(fill="x", padx=8, pady=6)
+        marco_ip = ttk.LabelFrame(interior, text="Índice ponderal de Rohrer")
         self.ip_label = tk.Label(
             marco_ip, text="", justify="left", font=("TkDefaultFont", 11, "bold"),
             foreground="#555555", wraplength=860)
@@ -2694,6 +2795,84 @@ class App(tk.Tk):
             marco_ip, text="", justify="left", font=("TkDefaultFont", 10, "bold"),
             foreground="#1E6E5C", wraplength=860)
         self.ip_patron_label.pack(anchor="w", padx=8, pady=(0, 8))
+
+        marco_motor = ttk.LabelFrame(interior, text="Desarrollo Motor — OMS-MGRS (2006)")
+        marco_motor.pack(fill="x", padx=8, pady=6)
+        barra_motor = ttk.Frame(marco_motor)
+        barra_motor.pack(fill="x", padx=5, pady=3)
+        ttk.Label(barra_motor, text="Fecha de la valoración:").pack(side="left", padx=3)
+        self.motor_fecha = tk.StringVar(value=date.today().isoformat())
+        ttk.Entry(barra_motor, textvariable=self.motor_fecha, width=14).pack(side="left", padx=3)
+        ttk.Button(barra_motor, text="Guardar", command=self._guardar_desarrollo_motor).pack(side="left", padx=3)
+        ttk.Button(barra_motor, text="Editar", command=self._editar_desarrollo_motor).pack(side="left", padx=3)
+        ttk.Button(barra_motor, text="Limpiar", command=self._limpiar_desarrollo_motor).pack(side="left", padx=3)
+        ttk.Button(barra_motor, text="Guardar en Excel", command=self._exportar_motor_xls).pack(side="left", padx=3)
+        ttk.Label(
+            marco_motor,
+            text="Registre la fecha en que el niño logró por primera vez cada hito o escriba "
+                 "directamente la edad (días). Los días se calculan desde la fecha de nacimiento y se "
+                 "ubican en los percentiles P1-P99 (ventana esperada P3-P97).",
+            foreground="#555555", wraplength=850,
+        ).pack(anchor="w", padx=6, pady=2)
+        cabecera = ttk.Frame(marco_motor)
+        cabecera.pack(fill="x", padx=6, pady=2)
+        for col, texto in enumerate((
+            "Hito", "Fecha de logro", "Edad (días)", "Percentil", "Clasificación",
+            "Definición del hito",
+        )):
+            ttk.Label(cabecera, text=texto, font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=col, sticky="w", padx=4)
+        self.motor_logro = {}
+        self.motor_edad = {}
+        self.motor_pct = {}
+        self.motor_clas = {}
+        self.motor_clas_label = {}
+        for hito in DESARROLLO_MOTOR_HITOS:
+            fila = ttk.Frame(marco_motor)
+            fila.pack(fill="x", padx=6, pady=1)
+            ttk.Label(fila, text=hito, width=26, anchor="w").grid(row=0, column=0, sticky="w", padx=4)
+            var = tk.StringVar()
+            self.motor_logro[hito] = var
+            var.trace_add("write", lambda *_, h=hito: self._calcular_desarrollo_motor(h))
+            ttk.Entry(fila, textvariable=var, width=12).grid(row=0, column=1, sticky="w", padx=4)
+            edad_var = tk.StringVar()
+            self.motor_edad[hito] = edad_var
+            edad_var.trace_add("write", lambda *_, h=hito: self._calcular_desarrollo_motor(h))
+            ttk.Entry(fila, textvariable=edad_var, width=8).grid(
+                row=0, column=2, sticky="w", padx=4)
+            pct_var = tk.StringVar()
+            self.motor_pct[hito] = pct_var
+            ttk.Label(fila, textvariable=pct_var, width=8, anchor="w").grid(
+                row=0, column=3, sticky="w", padx=4)
+            clas_var = tk.StringVar()
+            self.motor_clas[hito] = clas_var
+            lbl_clas = tk.Label(fila, textvariable=clas_var, width=30, anchor="w", foreground="#555555")
+            lbl_clas.grid(row=0, column=4, sticky="w", padx=4)
+            self.motor_clas_label[hito] = lbl_clas
+            tk.Label(
+                fila, text=DESARROLLO_MOTOR_DEFINICIONES.get(hito, ""),
+                justify="left", anchor="w", wraplength=330, foreground="#555555",
+                font=("TkDefaultFont", 9),
+            ).grid(row=0, column=5, sticky="nw", padx=4)
+        marco_pct = ttk.LabelFrame(marco_motor, text="Percentiles de referencia por hito (OMS-MGRS, en días)")
+        marco_pct = ttk.LabelFrame(marco_motor, text="Percentiles de referencia por hito (OMS-MGRS, en días)")
+        marco_pct.pack(fill="x", padx=6, pady=4)
+        columnas_pct = ["Hito", "P1", "P3", "P5", "P10", "P25", "P50", "P75", "P90", "P95", "P97", "P99"]
+        self.motor_tree = ttk.Treeview(marco_pct, columns=columnas_pct, show="headings", height=7)
+        for col in columnas_pct:
+            self.motor_tree.heading(col, text=col)
+            self.motor_tree.column(col, width=(212 if col == "Hito" else 52), anchor="center")
+        self.motor_tree.column("Hito", anchor="w")
+        self.motor_tree.pack(fill="both", expand=True, padx=4, pady=4)
+        conn = conectar()
+        for hito in DESARROLLO_MOTOR_HITOS:
+            filas = conn.execute(
+                "SELECT percentil, edad_dias FROM referencia_desarrollo_motor WHERE hito = ? ORDER BY percentil",
+                (hito,),
+            ).fetchall()
+            self.motor_tree.insert("", "end", values=[hito] + [str(d) for _, d in filas])
+        conn.close()
+
         self._recalcular_cans()
         self._recalcular_ip()
         for clave in ("peso_nacer", "longitud_nacer"):
@@ -3744,6 +3923,246 @@ class App(tk.Tk):
             messagebox.showerror("Excel", str(e))
             return
         self.status.config(text=f"CANS score exportado a {ruta}")
+
+    def _parse_fecha(self, texto):
+        texto = texto.strip()
+        if not texto:
+            return None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
+            try:
+                return datetime.strptime(texto, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    def _calcular_desarrollo_motor(self, hito, *args):
+        if not hasattr(self, "motor_edad") or hito not in self.motor_edad:
+            return
+        texto_fecha = self.motor_logro[hito].get().strip()
+        texto_dias = self.motor_edad[hito].get().strip()
+        self.motor_clas_label[hito].config(foreground="#555555")
+        dias = None
+        if texto_dias:
+            try:
+                if texto_dias.lstrip("0123456789") != "":
+                    raise ValueError
+                dias = int(texto_dias)
+            except ValueError:
+                self.motor_pct[hito].set("")
+                self.motor_clas[hito].set("Edad (días) no válida")
+                return
+        if texto_fecha:
+            nacimiento = self._parse_fecha(self.campos["fecha_nacimiento"].get())
+            logro = self._parse_fecha(texto_fecha)
+            if nacimiento is None or logro is None:
+                mensaje = "Complete la fecha de nacimiento" if nacimiento is None else "Fecha no válida"
+                self.motor_pct[hito].set("")
+                self.motor_clas[hito].set(mensaje)
+                return
+            dias_calc = (logro - nacimiento).days
+            if dias_calc < 0:
+                self.motor_edad[hito].set("")
+                self.motor_pct[hito].set("")
+                self.motor_clas[hito].set("Fecha anterior al nacimiento")
+                return
+            dias = dias_calc
+            if self.motor_edad[hito].get() != str(dias):
+                self.motor_edad[hito].set(str(dias))
+        if dias is None:
+            self.motor_edad[hito].set("")
+            self.motor_pct[hito].set("")
+            self.motor_clas[hito].set("")
+            return
+        pct = self._percentil_desarrollo_motor(hito, dias)
+        if pct is None:
+            self.motor_pct[hito].set("")
+            self.motor_clas[hito].set("Sin referencia")
+            return
+        self.motor_pct[hito].set(f"P{pct}" if pct < 100 else ">P99")
+        clasificacion = self._clasificar_percentil_motor(pct)
+        self.motor_clas[hito].set(clasificacion)
+        self.motor_clas_label[hito].config(
+            foreground=("#B00020" if pct < 3 or pct > 97 else "#1E6E5C"))
+
+    def _percentil_desarrollo_motor(self, hito, dias):
+        conn = conectar()
+        puntos = conn.execute(
+            "SELECT percentil, edad_dias FROM referencia_desarrollo_motor "
+            "WHERE hito = ? ORDER BY percentil",
+            (hito,),
+        ).fetchall()
+        conn.close()
+        if not puntos:
+            return None
+        if dias <= puntos[0][1]:
+            return 1
+        if dias >= puntos[-1][1]:
+            return 99
+        for (p1, d1), (p2, d2) in zip(puntos, puntos[1:]):
+            if d1 <= dias <= d2:
+                if d2 == d1:
+                    return p2
+                return int(round(p1 + (dias - d1) * (p2 - p1) / (d2 - d1)))
+        return None
+
+    def _clasificar_percentil_motor(self, pct):
+        if pct < 3:
+            return "Adquisición precoz (< P3)"
+        if pct <= 97:
+            return "Dentro de la ventana P3-P97"
+        return "Adquisición tardía (> P97)"
+
+    def _guardar_desarrollo_motor(self):
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        try:
+            conn.execute(
+                "DELETE FROM evaluacion_desarrollo_motor WHERE paciente_id = ?",
+                (self._paciente_id,),
+            )
+            guardados = 0
+            for hito in DESARROLLO_MOTOR_HITOS:
+                texto = self.motor_logro[hito].get().strip()
+                dias = self.motor_edad[hito].get().strip()
+                if not texto and not dias:
+                    continue
+                pct = self.motor_pct[hito].get().strip()
+                clas = self.motor_clas[hito].get().strip()
+                invalida = any(m in clas for m in (
+                    "Complete", "no válida", "anterior", "Sin referencia"))
+                conn.execute(
+                    """INSERT INTO evaluacion_desarrollo_motor
+                       (paciente_id, fecha_evaluacion, hito, fecha_logro,
+                        edad_dias, percentil, clasificacion)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (
+                        self._paciente_id, self.motor_fecha.get().strip(), hito, texto,
+                        int(dias) if dias.isdigit() else None,
+                        int(re.sub(r"\D", "", pct)) if pct else None,
+                        "" if invalida else clas,
+                    ),
+                )
+                guardados += 1
+            conn.commit()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        finally:
+            conn.close()
+        self.status.config(
+            text=f"Desarrollo motor guardado ({guardados}/{len(DESARROLLO_MOTOR_HITOS)} hitos) "
+                 f"| Paciente N° {self._paciente_id}")
+
+    def _editar_desarrollo_motor(self, silencioso=False):
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        fila = conn.execute(
+            "SELECT fecha_evaluacion FROM evaluacion_desarrollo_motor "
+            "WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+            (self._paciente_id,),
+        ).fetchone()
+        filas = conn.execute(
+            "SELECT hito, fecha_logro FROM evaluacion_desarrollo_motor WHERE paciente_id = ?",
+            (self._paciente_id,),
+        ).fetchall()
+        conn.close()
+        if not filas:
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay valoración de desarrollo motor guardada")
+            return
+        self.motor_fecha.set(fila[0] or date.today().isoformat())
+        for hito, logro in filas:
+            if hito in self.motor_logro:
+                self.motor_logro[hito].set(logro or "")
+        self.status.config(text=f"Editando desarrollo motor | Paciente N° {self._paciente_id}")
+
+    def _limpiar_desarrollo_motor(self):
+        for var in self.motor_logro.values():
+            var.set("")
+        self.motor_fecha.set(date.today().isoformat())
+        self.status.config(text="Desarrollo motor reiniciado")
+
+    def _exportar_motor_xls(self):
+        if not OPENPYXL_OK:
+            messagebox.showwarning(
+                "Excel", "El paquete 'openpyxl' no está instalado.\nInstálelo con:  pip install openpyxl")
+            return
+        sugerencia = f"DesarrolloMotor_{date.today().isoformat()}.xlsx"
+        ruta = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar desarrollo motor en Excel",
+            initialfile=sugerencia,
+            defaultextension=".xlsx",
+            filetypes=[("Libro de Excel", "*.xlsx")],
+        )
+        if not ruta:
+            return
+        titulo = _XlsxFont(bold=True, size=14)
+        encabezado = _XlsxFont(bold=True, color="FFFFFF")
+        relleno = _XlsxFill("solid", fgColor="0B5C7A")
+        centrado = _XlsxAlignment(horizontal="center", vertical="center", wrap_text=True)
+        conn = conectar()
+        libro = _XlsxWorkbook()
+        hoja = libro.active
+        hoja.title = "Desarrollo motor"
+        hoja["A1"] = "Desarrollo Motor — OMS-MGRS (WHO Motor Development Study, 2006)"
+        hoja["A1"].font = titulo
+        hoja["A2"] = "Paciente"
+        hoja["B2"] = self.campos["nombre"].get().strip() or "-"
+        hoja["A3"] = "Fecha"
+        hoja["B3"] = self.motor_fecha.get().strip()
+        fila_tabla = 5
+        encabezados = ["Hito", "Fecha de logro", "Edad (días)", "Percentil", "Clasificación"]
+        for columna, texto in enumerate(encabezados, start=1):
+            celda = hoja.cell(row=fila_tabla, column=columna, value=texto)
+            celda.font = encabezado
+            celda.fill = relleno
+            celda.alignment = centrado
+        for i, hito in enumerate(DESARROLLO_MOTOR_HITOS, start=1):
+            fila = fila_tabla + i
+            hoja.cell(row=fila, column=1, value=hito)
+            hoja.cell(row=fila, column=2, value=self.motor_logro[hito].get().strip())
+            hoja.cell(row=fila, column=3, value=self.motor_edad[hito].get().strip())
+            hoja.cell(row=fila, column=4, value=self.motor_pct[hito].get().strip())
+            hoja.cell(row=fila, column=5, value=self.motor_clas[hito].get().strip())
+        fila = fila_tabla + len(DESARROLLO_MOTOR_HITOS) + 1
+        hoja.cell(row=fila, column=1,
+                  value="Ventana de adquisición: P3-P97. Fuente: Acta Paediatr Suppl. 2006;450:86-95.")
+        for columna, ancho in enumerate((34, 16, 12, 10, 36), start=1):
+            hoja.column_dimensions[_xlsx_col(columna)].width = ancho
+        hoja2 = libro.create_sheet("Percentiles (referencia)")
+        hoja2["A1"] = "Percentiles en días, seis hitos motores gruesos (OMS-MGRS 2006)"
+        hoja2["A1"].font = titulo
+        columnas_pct = ["Hito", "P1", "P3", "P5", "P10", "P25", "P50", "P75", "P90", "P95", "P97", "P99"]
+        for columna, texto in enumerate(columnas_pct, start=1):
+            celda = hoja2.cell(row=2, column=columna, value=texto)
+            celda.font = encabezado
+            celda.fill = relleno
+            celda.alignment = centrado
+        for i, hito in enumerate(DESARROLLO_MOTOR_HITOS, start=1):
+            filas = conn.execute(
+                "SELECT percentil, edad_dias FROM referencia_desarrollo_motor "
+                "WHERE hito = ? ORDER BY percentil",
+                (hito,),
+            ).fetchall()
+            hoja2.cell(row=2 + i, column=1, value=hito)
+            for columna, (_p, dias) in enumerate(filas, start=2):
+                hoja2.cell(row=2 + i, column=columna, value=dias)
+        for columna, ancho in enumerate((34, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), start=1):
+            hoja2.column_dimensions[_xlsx_col(columna)].width = ancho
+        conn.close()
+        try:
+            libro.save(ruta)
+        except PermissionError:
+            messagebox.showerror(
+                "Excel", f"No se pudo escribir en:\n{ruta}\n\nCierre el archivo si está abierto en Excel.")
+            return
+        except Exception as e:
+            messagebox.showerror("Excel", str(e))
+            return
+        self.status.config(text=f"Desarrollo motor exportado a {ruta}")
 
     def _datos_paciente(self):
         return (

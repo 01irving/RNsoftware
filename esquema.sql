@@ -202,3 +202,25 @@ CREATE TABLE IF NOT EXISTS evaluacion_cans (
     fecha_registro TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_cans_paciente ON evaluacion_cans(paciente_id);
+
+CREATE TABLE IF NOT EXISTS referencia_desarrollo_motor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hito TEXT NOT NULL,
+    percentil INTEGER NOT NULL,
+    edad_dias INTEGER NOT NULL,
+    UNIQUE (hito, percentil)
+);
+CREATE INDEX IF NOT EXISTS idx_desarrollo_motor ON referencia_desarrollo_motor(hito, percentil);
+
+CREATE TABLE IF NOT EXISTS evaluacion_desarrollo_motor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    fecha_evaluacion TEXT,
+    hito TEXT NOT NULL,
+    fecha_logro TEXT,
+    edad_dias INTEGER,
+    percentil INTEGER,
+    clasificacion TEXT,
+    fecha_registro TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_desarrollo_motor_paciente ON evaluacion_desarrollo_motor(paciente_id);

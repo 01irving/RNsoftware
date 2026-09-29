@@ -1,0 +1,67 @@
+hito,percentil,edad_dias
+Sentarse sin apoyo,1,115
+Sentarse sin apoyo,3,125
+Sentarse sin apoyo,5,131
+Sentarse sin apoyo,10,140
+Sentarse sin apoyo,25,158
+Sentarse sin apoyo,50,179
+Sentarse sin apoyo,75,204
+Sentarse sin apoyo,90,229
+Sentarse sin apoyo,95,245
+Sentarse sin apoyo,97,256
+Sentarse sin apoyo,99,279
+Pararse con apoyo,1,147
+Pararse con apoyo,3,160
+Pararse con apoyo,5,167
+Pararse con apoyo,10,178
+Pararse con apoyo,25,200
+Pararse con apoyo,50,226
+Pararse con apoyo,75,256
+Pararse con apoyo,90,287
+Pararse con apoyo,95,307
+Pararse con apoyo,97,320
+Pararse con apoyo,99,348
+Gatear en manos y rodillas,1,157
+Gatear en manos y rodillas,3,177
+Gatear en manos y rodillas,5,187
+Gatear en manos y rodillas,10,202
+Gatear en manos y rodillas,25,226
+Gatear en manos y rodillas,50,254
+Gatear en manos y rodillas,75,284
+Gatear en manos y rodillas,90,319
+Gatear en manos y rodillas,95,345
+Gatear en manos y rodillas,97,364
+Gatear en manos y rodillas,99,409
+Caminar con apoyo,1,181
+Caminar con apoyo,3,200
+Caminar con apoyo,5,210
+Caminar con apoyo,10,225
+Caminar con apoyo,25,249
+Caminar con apoyo,50,275
+Caminar con apoyo,75,304
+Caminar con apoyo,90,336
+Caminar con apoyo,95,360
+Caminar con apoyo,97,378
+Caminar con apoyo,99,418
+Pararse solo,1,211
+Pararse solo,3,235
+Pararse solo,5,248
+Pararse solo,10,266
+Pararse solo,25,296
+Pararse solo,50,330
+Pararse solo,75,367
+Pararse solo,90,408
+Pararse solo,95,438
+Pararse solo,97,461
+Pararse solo,99,514
+Caminar solo,1,250
+Caminar solo,3,274
+Caminar solo,5,286
+Caminar solo,10,304
+Caminar solo,25,333
+Caminar solo,50,365
+Caminar solo,75,400
+Caminar solo,90,438
+Caminar solo,95,466
+Caminar solo,97,487
+Caminar solo,99,534
