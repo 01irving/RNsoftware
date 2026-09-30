@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS interaccion_farmaco (
     recomendacion TEXT
 );
 
+CREATE TABLE IF NOT EXISTS lactmed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    drug_name TEXT NOT NULL,
+    aliases TEXT,
+    summary TEXT,
+    consideration TEXT,
+    alternatives TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lactmed_drug ON lactmed(drug_name);
+
+CREATE TABLE IF NOT EXISTS lactmed_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    fuente TEXT,
+    fecha TEXT
+);
+
 CREATE TABLE IF NOT EXISTS evaluacion_bioquimica (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,

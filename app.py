@@ -11,6 +11,13 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 from pathlib import Path
 
 try:
+    import lactmed as _LACTMED
+    LACTMED_OK = True
+except ImportError:
+    _LACTMED = None
+    LACTMED_OK = False
+
+try:
     from pygrowup import Observation as _PGObservation, exceptions as _PGEx
     PIGROWUP_OK = True
 except ImportError:
@@ -2057,6 +2064,9 @@ class App(tk.Tk):
             conn.execute("ALTER TABLE evaluacion_bioquimica ADD COLUMN unidad TEXT")
         if "referencia_edad" not in columnas_bio:
             conn.execute("ALTER TABLE evaluacion_bioquimica ADD COLUMN referencia_edad TEXT")
+        columnas_lact = [fila[1] for fila in conn.execute("PRAGMA table_info(lactmed)")]
+        if "aliases" not in columnas_lact:
+            conn.execute("ALTER TABLE lactmed ADD COLUMN aliases TEXT")
         col_pac = [fila[1] for fila in conn.execute("PRAGMA table_info(paciente)")]
         if "nombre" not in col_pac:
             conn.execute("ALTER TABLE paciente ADD COLUMN nombre TEXT")
@@ -2722,19 +2732,227 @@ class App(tk.Tk):
         ttk.Button(barra, text="Guardar", command=self._guardar_farmaco).pack(side="left", padx=3)
         ttk.Button(barra, text="Editar", command=self._editar_farmaco).pack(side="left", padx=3)
 
-        self.farmaco_tree = self._crear_grid(
-            tab, ["Fármaco", "Vía", "Interacción", "Recomendación"], alturas=8
-        )
-        ttk.Button(tab, text="+ Agregar fila", command=self._agregar_fila).pack(pady=4)
-        ttk.Button(tab, text="- Quitar fila seleccionada", command=self._quitar_fila).pack(pady=2)
+        marco_busca = ttk.LabelFrame(tab, text="Buscador de fármacos (base LactMed de la NIH)")
+        marco_busca.pack(fill="x", padx=8, pady=4)
+        barra_busca = ttk.Frame(marco_busca)
+        barra_busca.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(barra_busca, text="Fármaco:").pack(side="left", padx=5)
+        self.lact_busca = tk.StringVar()
+        entry_busca = ttk.Entry(barra_busca, textvariable=self.lact_busca, width=32)
+        entry_busca.pack(side="left", padx=5)
+        entry_busca.bind("<KeyRelease>", self._buscar_lactmed)
+        entry_busca.bind("<Return>", lambda e: self._aplicar_lactmed())
+        ttk.Button(barra_busca, text="Buscar", command=self._buscar_lactmed).pack(side="left", padx=3)
+        ttk.Button(barra_busca, text="Aplicar selección", command=self._aplicar_lactmed).pack(side="left", padx=3)
+        ttk.Button(barra_busca, text="Actualizar base LactMed", command=self._actualizar_lactmed).pack(side="left", padx=3)
+        self.lact_info = ttk.Label(marco_busca, text="", foreground="#555555")
+        self.lact_info.pack(anchor="w", padx=6, pady=(0, 4))
+
+        contenedor_lista = ttk.Frame(marco_busca)
+        contenedor_lista.pack(fill="x", padx=6, pady=(0, 6))
+        self.lact_lista = tk.Listbox(contenedor_lista, height=6, exportselection=False)
+        tsb = ttk.Scrollbar(contenedor_lista, orient="vertical", command=self.lact_lista.yview)
+        self.lact_lista.configure(yscrollcommand=tsb.set)
+        self.lact_lista.pack(side="left", fill="both", expand=True)
+        tsb.pack(side="right", fill="y")
+        self.lact_lista.bind("<Double-Button-1>", lambda e: self._aplicar_lactmed())
+        self._refrescar_lact_info()
+
+        self.farmaco_cards = []
+        self.farmaco_card_sel = None
+        contenedor_f = ttk.Frame(tab)
+        contenedor_f.pack(fill="both", expand=True, padx=8, pady=4)
+        self.farmaco_canvas = tk.Canvas(contenedor_f, highlightthickness=0)
+        tsb_f = ttk.Scrollbar(contenedor_f, orient="vertical", command=self.farmaco_canvas.yview)
+        self.farmaco_interior = ttk.Frame(self.farmaco_canvas)
+        ventana_f = self.farmaco_canvas.create_window(
+            (0, 0), window=self.farmaco_interior, anchor="nw")
+        self.farmaco_canvas.configure(yscrollcommand=tsb_f.set)
+        self.farmaco_canvas.pack(side="left", fill="both", expand=True)
+        tsb_f.pack(side="right", fill="y")
+
+        def _actualizar_scroll_f(_event=None):
+            self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
+
+        def _ancho_scroll_f(_event=None):
+            self.farmaco_canvas.itemconfigure(ventana_f, width=_event.width)
+
+        self.farmaco_interior.bind("<Configure>", _actualizar_scroll_f)
+        self.farmaco_canvas.bind("<Configure>", _ancho_scroll_f)
+
+        botonera_f = ttk.Frame(tab)
+        botonera_f.pack(fill="x", padx=8, pady=4)
+        ttk.Button(botonera_f, text="+ Agregar fármaco", command=self._agregar_fila).pack(side="left", padx=3)
+        ttk.Button(botonera_f, text="- Quitar seleccionado", command=self._quitar_fila).pack(side="left", padx=3)
+
+    def _refrescar_lact_info(self):
+        if not hasattr(self, "lact_info"):
+            return
+        try:
+            conn = conectar()
+            fila = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM lactmed), "
+                "(SELECT fecha FROM lactmed_meta WHERE id = 1)"
+            ).fetchone()
+            conn.close()
+        except sqlite3.Error:
+            fila = None
+        if fila and fila[0]:
+            self.lact_info.config(
+                text=f"Base LactMed {fila[1] or ''} · {fila[0]} fármacos indexados")
+        else:
+            self.lact_info.config(
+                text="La base LactMed aún no está descargada. Use 'Actualizar base LactMed' "
+                     "(primera descarga ~200 MB; requiere internet).")
+
+    def _buscar_lactmed(self, *_args):
+        self.lact_lista.delete(0, "end")
+        palabra = self.lact_busca.get().strip()
+        if not palabra:
+            return
+        conn = conectar()
+        try:
+            filas = conn.execute(
+                "SELECT drug_name FROM lactmed WHERE drug_name LIKE ? OR aliases LIKE ? "
+                "ORDER BY drug_name LIMIT 100",
+                ("%" + palabra + "%", "%" + palabra + "%"),
+            ).fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM lactmed").fetchone()[0]
+        finally:
+            conn.close()
+        if total == 0:
+            self.lact_lista.insert("end", "Descargue primero la base LactMed")
+            return
+        for (nombre,) in filas:
+            self.lact_lista.insert("end", nombre)
+        if not filas:
+            self.lact_lista.insert("end", "Sin resultados")
+
+    def _aplicar_lactmed(self):
+        sel = self.lact_lista.curselection()
+        if not sel:
+            return
+        nombre = self.lact_lista.get(sel[0])
+        if nombre in ("Sin resultados", "Descargue primero la base LactMed"):
+            return
+        conn = conectar()
+        fila = conn.execute(
+            "SELECT summary, consideration, alternatives FROM lactmed WHERE drug_name = ?",
+            (nombre,),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            return
+        summary, consideration, alternativas = (f or "" for f in fila)
+        partes = []
+        for tx in (summary, consideration):
+            tx = tx.strip()
+            if tx and tx not in partes:
+                partes.append(tx)
+        if alternativas:
+            partes.append("Alternativas: " + alternativas.strip())
+        self._agregar_farmaco_card(farmaco=nombre, interaccion="\n\n".join(partes))
+        self.status.config(text=f"Fármaco '{nombre}' aplicado desde LactMed")
+        self._refrescar_lact_info()
+
+    def _actualizar_lactmed(self):
+        if not LACTMED_OK:
+            messagebox.showerror("LactMed", "El módulo lactmed.py no está disponible")
+            return
+        if not (_LACTMED and hasattr(_LACTMED, "descargar_e_importar")):
+            messagebox.showerror("LactMed", "Versión de lactmed.py incompatible")
+            return
+        if not messagebox.askyesno(
+            "LactMed",
+            "Descargar e importar la base LactMed completa desde NCBI?\n"
+            "La primera descarga son ~200 MB y puede tardar varios minutos; "
+            "luego queda cacheada localmente.",
+        ):
+            return
+        self.status.config(text="Descargando e importando base LactMed (no cierre la app)...")
+        import threading
+
+        def trabajo():
+            try:
+                local = Path(__file__).resolve().parent / "data" / "lactmed_raw"
+                conn = conectar()
+                n = _LACTMED.descargar_e_importar(conn, local)
+                conn.close()
+                self.after(0, lambda: self._lact_ok(n))
+            except Exception as e:
+                self.after(0, lambda e=e: self._lact_error(str(e)))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _lact_ok(self, n):
+        self._refrescar_lact_info()
+        self.status.config(text=f"Base LactMed actualizada: {n} fármacos ({_LACTMED.TARBALL_NAME})")
+        messagebox.showinfo("LactMed", f"Base actualizada con {n} fármacos.\n{_LACTMED.TARBALL_NAME}")
+
+    def _lact_error(self, error):
+        self.status.config(text="Error al actualizar la base LactMed")
+        self._refrescar_lact_info()
+        messagebox.showerror("LactMed", error)
+
+    def _agregar_farmaco_card(self, farmaco="", interaccion=""):
+        cont = tk.Frame(
+            self.farmaco_interior, highlightbackground="#c9c9c9", highlightthickness=1)
+        cont.pack(fill="x", padx=6, pady=3)
+
+        def _seleccionar(_e=None):
+            if self.farmaco_card_sel is cont:
+                return
+            if self.farmaco_card_sel is not None:
+                self.farmaco_card_sel.configure(highlightbackground="#c9c9c9")
+            self.farmaco_card_sel = cont
+            cont.configure(highlightbackground="#0078D7")
+
+        cont.bind("<Button-1>", _seleccionar)
+        encab = ttk.Frame(cont)
+        encab.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(encab, text="Fármaco:", font=("TkDefaultFont", 10, "bold")).pack(side="left")
+        var_f = tk.StringVar(value=farmaco)
+        e_f = ttk.Entry(encab, textvariable=var_f, width=40)
+        e_f.pack(side="left", padx=4)
+        ttk.Label(cont, text="Interacción:").pack(anchor="w", padx=6)
+        tx_i = tk.Text(cont, height=8, wrap="word", width=92, font=("TkDefaultFont", 10),
+                       highlightthickness=1, relief="solid")
+        tx_i.pack(fill="x", padx=6, pady=(0, 5))
+        tx_i.insert("1.0", interaccion)
+        for wgt in (e_f, tx_i):
+            wgt.bind("<Button-1>", _seleccionar, add="+")
+        self.farmaco_cards.append({
+            "frame": cont,
+            "farmaco": var_f,
+            "interaccion": tx_i,
+        })
+        self.farmaco_interior.update_idletasks()
+        self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
+        return cont
+
+    def _limpiar_farmaco_cards(self):
+        for c in list(self.farmaco_cards):
+            c["frame"].destroy()
+        self.farmaco_cards.clear()
+        self.farmaco_card_sel = None
+        if hasattr(self, "farmaco_interior"):
+            self.farmaco_interior.update_idletasks()
+            self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
 
     def _agregar_fila(self):
-        self.farmaco_tree.insert("", "end", values=("", "", "", ""))
+        self._agregar_farmaco_card()
 
     def _quitar_fila(self):
-        sel = self.farmaco_tree.selection()
-        if sel:
-            self.farmaco_tree.delete(sel[0])
+        if self.farmaco_card_sel is None:
+            return
+        for i, c in enumerate(self.farmaco_cards):
+            if c["frame"] is self.farmaco_card_sel:
+                c["frame"].destroy()
+                del self.farmaco_cards[i]
+                break
+        self.farmaco_card_sel = None
+        self.farmaco_interior.update_idletasks()
+        self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
 
     # ---------- Pestaña 4 Evaluación Bioquímica ----------
     def _tab_bioquimica(self):
@@ -4557,8 +4775,7 @@ class App(tk.Tk):
         self._consulta_id = None
         for item in self.visita_tree.get_children():
             self.visita_tree.delete(item)
-        for item in self.farmaco_tree.get_children():
-            self.farmaco_tree.delete(item)
+        self._limpiar_farmaco_cards()
         for var in self.bio_resultado.values():
             var.set("")
         if hasattr(self, "bio_edad_sel"):
@@ -4917,12 +5134,13 @@ class App(tk.Tk):
             conn = conectar()
             cur = conn.cursor()
             cur.execute("DELETE FROM interaccion_farmaco WHERE paciente_id = ?", (self._paciente_id,))
-            for item in self.farmaco_tree.get_children():
-                farmaco, via, interaccion, recomendacion = self.farmaco_tree.item(item, "values")
-                if any([farmaco, via, interaccion, recomendacion]):
+            for c in self.farmaco_cards:
+                farmaco = c["farmaco"].get().strip()
+                interaccion = c["interaccion"].get("1.0", "end").strip()
+                if farmaco or interaccion:
                     cur.execute(
-                        "INSERT INTO interaccion_farmaco (paciente_id, farmaco, via, interaccion, recomendacion) VALUES (?,?,?,?,?)",
-                        (self._paciente_id, farmaco, via, interaccion, recomendacion),
+                        "INSERT INTO interaccion_farmaco (paciente_id, farmaco, interaccion) VALUES (?,?,?)",
+                        (self._paciente_id, farmaco, interaccion),
                     )
             conn.commit()
             conn.close()
@@ -4938,14 +5156,22 @@ class App(tk.Tk):
             return
         conn = conectar()
         filas = conn.execute(
-            "SELECT farmaco, via, interaccion, recomendacion FROM interaccion_farmaco WHERE paciente_id = ? ORDER BY id",
+            "SELECT farmaco, interaccion, recomendacion FROM interaccion_farmaco WHERE paciente_id = ? ORDER BY id",
             (self._paciente_id,),
         ).fetchall()
         conn.close()
-        for item in self.farmaco_tree.get_children():
-            self.farmaco_tree.delete(item)
+        self._limpiar_farmaco_cards()
         for fila in filas:
-            self.farmaco_tree.insert("", "end", values=(fila[0] or "", fila[1] or "", fila[2] or "", fila[3] or ""))
+            interaccion = (fila[1] or "").strip()
+            recomendacion = (fila[2] or "").strip()
+            if interaccion and recomendacion:
+                interaccion = interaccion + "\n\n" + recomendacion
+            elif recomendacion:
+                interaccion = recomendacion
+            self._agregar_farmaco_card(
+                farmaco=fila[0] or "",
+                interaccion=interaccion,
+            )
         if not filas:
             if not silencioso:
                 messagebox.showinfo("Editar", "No hay fármacos guardados para este paciente")
