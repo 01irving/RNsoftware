@@ -58,8 +58,24 @@ CREATE TABLE IF NOT EXISTS evaluacion_bioquimica (
     paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
     prueba TEXT NOT NULL,
     valor_normal TEXT,
-    resultado TEXT
+    resultado TEXT,
+    comparacion TEXT,
+    unidad TEXT,
+    referencia_edad TEXT
 );
+
+CREATE TABLE IF NOT EXISTS referencia_bioquimica (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    grupo TEXT,
+    prueba TEXT NOT NULL UNIQUE,
+    unidad TEXT,
+    ref_nacimiento TEXT,
+    ref_1_semana TEXT,
+    ref_1_mes TEXT,
+    ref_1_5_mes TEXT,
+    notas TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bioquimica_referencia ON referencia_bioquimica(grupo, prueba);
 
 CREATE INDEX IF NOT EXISTS idx_signos_paciente ON signos_clinicos(paciente_id);
 CREATE INDEX IF NOT EXISTS idx_farmaco_paciente ON interaccion_farmaco(paciente_id);

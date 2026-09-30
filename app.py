@@ -229,6 +229,8 @@ PRUEBAS = [
     ("Lactato", "0.5-2.2 mmol/L"),
 ]
 
+BIOQ_COLUMNAS_EDAD = ["Nacimiento", "1 semana", "1 mes", "1 1/2 mes"]
+
 
 CSV_DEFAULT = {
     "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
@@ -1013,6 +1015,34 @@ Caminar solo,95,466
 Caminar solo,97,487
 Caminar solo,99,534
 """,
+    "QS.csv": """Tabla,Prueba,Unidad,Nacimiento,1 semana,1 mes,1 1/2 mes,Notas
+Química sanguínea,Proteína total en suero,g/dL,4.4-7.6,,,,
+Química sanguínea,Albúmina en suero,g/dL,2.9-5.5,,,,
+Química sanguínea,Prealbúmina en suero,mg/dL,,4.0-22.0,9.0-27.0,,
+Química sanguínea,Creatinina en suero,mg/dL,0.2-1.2,,,,
+Química sanguínea,Urea,mmol/L,1.3-5.1,,,,
+Química sanguínea,Colesterol total en suero,mg/dL,50-120,,,,
+Química sanguínea,Triglicéridos en suero,mg/dL,20-150,,,,
+Química sanguínea,Folato en suero,ng/mL,2.0-15.0,,,,
+Química sanguínea,Hierro total en suero,µg/dL,55-150,,,,
+Química sanguínea,Magnesio,mmol/L,0.71-0.96,,,,
+Química sanguínea,Calcio en sangre ionizada,mmol/L,0.90-1.45,,,,
+Química sanguínea,Calcio en suero,mg/dL,Prematuro: 6.0-10.0; a término: 7.0-12.0,,,,
+Química sanguínea,Fósforo en suero,mg/dL,Prematuro: 5.6-8.0; a término: 5.0-7.8; también se alcanza a leer 4.8-8.1,,,,
+Química sanguínea,Sodio en suero,mmol/L,Prematuro: 132-140; a término: 133-142,,,,
+Química sanguínea,Potasio en suero,mmol/L,4.5-7.0,,,,
+Biometría hemática,Hemoglobina,g/dL,14.0-22.5,13.5-20.5,11.0-13.0,,
+Biometría hemática,Hematocrito,%,47-62,42-62,30-48,,
+Biometría hemática,Volumen corpuscular medio,fL,100-135,100-120,84-105,,
+Biometría hemática,Hemoglobina corpuscular media,pg,31-37,28-40,24-36,,
+Biometría hemática,Concentración de hemoglobina corpuscular media,%,32-36,32-36,32-36,,
+Biometría hemática,Leucocitos,×10⁹/L,9-30,5-21,5-19,,
+Biometría hemática,Neutrófilos,×10⁹/L,15-25.0,1.5-10.0,1.0-8.0,,
+Biometría hemática,Linfocitos,×10⁹/L,2-11,2-17,2-13,,
+Biometría hemática,Monocitos,×10⁹/L,0.1-1.7,0.1-1.7,0.1-1.1,,"El valor de 1 mes se lee 0.1-1.1 en la imagen; verificar contra el original."
+Biometría hemática,Eosinófilos,×10⁹/L,0.1-1.1,0.1-1.1,0.1-1.1,,
+Biometría hemática,Plaquetas,×10⁹/L,150-600,150-600,150-600,,
+Examen general de orina,Creatinina en orina,g/24 h,,,,0.8-2.8,La imagen muestra el intervalo 0.8 a 2.8 g/24 h.""",
 }
 
 
@@ -2018,6 +2048,15 @@ class App(tk.Tk):
         ):
             if nombre not in columnas_cans:
                 conn.execute(f"ALTER TABLE evaluacion_cans ADD COLUMN {nombre} {tipo}")
+        columnas_bio = [
+            fila[1] for fila in conn.execute("PRAGMA table_info(evaluacion_bioquimica)")
+        ]
+        if "comparacion" not in columnas_bio:
+            conn.execute("ALTER TABLE evaluacion_bioquimica ADD COLUMN comparacion TEXT")
+        if "unidad" not in columnas_bio:
+            conn.execute("ALTER TABLE evaluacion_bioquimica ADD COLUMN unidad TEXT")
+        if "referencia_edad" not in columnas_bio:
+            conn.execute("ALTER TABLE evaluacion_bioquimica ADD COLUMN referencia_edad TEXT")
         col_pac = [fila[1] for fila in conn.execute("PRAGMA table_info(paciente)")]
         if "nombre" not in col_pac:
             conn.execute("ALTER TABLE paciente ADD COLUMN nombre TEXT")
@@ -2044,6 +2083,7 @@ class App(tk.Tk):
             "ECRN_velocidad_ninos.csv", "ECRN_velocidad_ninas.csv",
             "tabla_peso_para_la_edad.csv", "tabla_velocidad_crecimiento.csv",
             "tabla_velocidad_oms.csv", "tabla_desarrollo_motor_oms.csv",
+            "QS.csv",
         ]))
         for nombre in nombres:
             if conn.execute("SELECT 1 FROM archivo_csv WHERE nombre = ?", (nombre,)).fetchone():
@@ -2269,6 +2309,28 @@ class App(tk.Tk):
                     "INSERT OR REPLACE INTO referencia_desarrollo_motor (hito, percentil, edad_dias) VALUES (?,?,?)",
                     (fila["hito"].strip(), int(fila["percentil"]), int(fila["edad_dias"])),
                 )
+        contenido_qs = (
+            (data_dir / "QS.csv").read_text(encoding="utf-8-sig")
+            if (data_dir / "QS.csv").exists()
+            else CSV_DEFAULT["QS.csv"]
+        )
+        conn.execute(
+            "UPDATE archivo_csv SET contenido = ? WHERE nombre = 'QS.csv'",
+            (contenido_qs,),
+        )
+        conn.execute("DELETE FROM referencia_bioquimica")
+        for fila in csv.DictReader(io.StringIO(contenido_qs)):
+            conn.execute(
+                """INSERT OR REPLACE INTO referencia_bioquimica
+                   (grupo, prueba, unidad, ref_nacimiento, ref_1_semana, ref_1_mes, ref_1_5_mes, notas)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    fila["Tabla"].strip(), fila["Prueba"].strip(), fila["Unidad"].strip(),
+                    fila.get("Nacimiento", "").strip(), fila.get("1 semana", "").strip(),
+                    fila.get("1 mes", "").strip(), fila.get("1 1/2 mes", "").strip(),
+                    fila.get("Notas", "").strip(),
+                ),
+            )
         conn.commit()
 
     def _crear_notebook(self):
@@ -2684,12 +2746,165 @@ class App(tk.Tk):
         ttk.Label(barra, text="Evaluación Bioquímica:").pack(side="left", padx=5)
         ttk.Button(barra, text="Guardar", command=self._guardar_bioquimica).pack(side="left", padx=3)
         ttk.Button(barra, text="Editar", command=self._editar_bioquimica).pack(side="left", padx=3)
-
-        self.bio_tree = self._crear_grid(
-            tab, ["Pruebas Bioquímicas", "Valores Normales", "Resultados"], alturas=20
+        ttk.Button(barra, text="Limpiar", command=self._limpiar_bioquimica).pack(side="left", padx=3)
+        ttk.Label(barra, text="  Referencia para edad:").pack(side="left", padx=(10, 0))
+        self.bio_edad_sel = tk.StringVar(value="Automática según edad")
+        combo_edad = ttk.Combobox(
+            barra, textvariable=self.bio_edad_sel, state="readonly", width=20,
+            values=["Automática según edad"] + BIOQ_COLUMNAS_EDAD,
         )
-        for prueba, valor in PRUEBAS:
-            self.bio_tree.insert("", "end", values=(prueba, valor, ""))
+        combo_edad.pack(side="left", padx=5)
+        combo_edad.bind("<<ComboboxSelected>>", self._actualizar_edad_bioquimica)
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _actualizar_scroll(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _ancho_scroll(_event=None):
+            canvas.itemconfigure(ventana, width=_event.width)
+
+        interior.bind("<Configure>", _actualizar_scroll)
+        canvas.bind("<Configure>", _ancho_scroll)
+
+        conn = conectar()
+        filas = conn.execute(
+            "SELECT grupo, prueba, unidad, ref_nacimiento, ref_1_semana, ref_1_mes, "
+            "ref_1_5_mes, notas FROM referencia_bioquimica ORDER BY id"
+        ).fetchall()
+        conn.close()
+        self.bioq_pruebas = []
+        self.bioq_grupos = []
+        self.bioq_ref = {}
+        grupos = {}
+        for grupo, prueba, unidad, r0, r1, r2, r3, notas in filas:
+            grupos.setdefault(grupo, []).append(prueba)
+            self.bioq_ref[prueba] = {
+                "grupo": grupo,
+                "unidad": (unidad or "").strip(),
+                "refs": [(r0 or "").strip(), (r1 or "").strip(), (r2 or "").strip(), (r3 or "").strip()],
+                "notas": (notas or "").strip(),
+            }
+            self.bioq_pruebas.append(prueba)
+        self.bioq_grupos = [(g, grupos[g]) for g in grupos]
+
+        ttk.Label(
+            interior,
+            text="Ingrese el resultado de cada prueba: se compara automáticamente con el valor "
+                 "de referencia QS según la edad del paciente (Bajo / Normal / Alto) y se guarda "
+                 "con la evaluación.",
+            foreground="#555555", wraplength=850,
+        ).pack(anchor="w", padx=6, pady=2)
+        self.bioq_edad_info = ttk.Label(interior, text="", foreground="#555555")
+        self.bioq_edad_info.pack(anchor="w", padx=6, pady=1)
+        cabecera = ttk.Frame(interior)
+        cabecera.pack(fill="x", padx=6, pady=2)
+        for col, texto in enumerate((
+            "Pruebas Bioquímicas", "Unidad", "Valor normal (según edad)",
+            "Resultado (input)", "Evaluación",
+        )):
+            ttk.Label(cabecera, text=texto, font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=col, sticky="w", padx=4)
+
+        self.bio_resultado = {}
+        self.bio_estado = {}
+        self.bio_estado_label = {}
+        self.bio_ref_label = {}
+        for grupo, pruebas in self.bioq_grupos:
+            ttk.Label(interior, text=grupo, font=("TkDefaultFont", 9, "bold"),
+                      foreground="#0B5C7A").pack(anchor="w", padx=6, pady=(6, 1))
+            for prueba in pruebas:
+                info = self.bioq_ref[prueba]
+                fila = ttk.Frame(interior)
+                fila.pack(fill="x", padx=6, pady=1)
+                ttk.Label(fila, text=prueba, width=40, anchor="w").grid(
+                    row=0, column=0, sticky="w", padx=4)
+                ttk.Label(fila, text=info["unidad"], width=10, anchor="w",
+                          foreground="#555555").grid(row=0, column=1, sticky="w", padx=4)
+                lbl_ref = ttk.Label(fila, text="", width=26, anchor="w", foreground="#0B5C7A")
+                lbl_ref.grid(row=0, column=2, sticky="w", padx=4)
+                self.bio_ref_label[prueba] = lbl_ref
+                var = tk.StringVar()
+                self.bio_resultado[prueba] = var
+                var.trace_add("write", lambda *_, p=prueba: self._comparar_bioquimica(p))
+                ttk.Entry(fila, textvariable=var, width=16).grid(
+                    row=0, column=3, sticky="w", padx=4)
+                estado_var = tk.StringVar(value="—")
+                self.bio_estado[prueba] = estado_var
+                lbl = tk.Label(fila, textvariable=estado_var, width=22, anchor="w", foreground="#555555")
+                lbl.grid(row=0, column=4, sticky="w", padx=4)
+                self.bio_estado_label[prueba] = lbl
+
+        for clave in ("fecha_nacimiento", "fecha_actual"):
+            if hasattr(self.campos[clave], "trace_add"):
+                self.campos[clave].trace_add("write", self._actualizar_edad_bioquimica)
+        self._actualizar_edad_bioquimica()
+
+    def _dias_vida(self):
+        return self._parsedias_desde_nacimiento()
+
+    def _columna_bioq_auto(self, dias):
+        if dias is None:
+            return 0
+        if dias <= 7:
+            return 0
+        if dias <= 27:
+            return 1
+        if dias <= 40:
+            return 2
+        return 3
+
+    def _columna_bioq(self):
+        sel = self.bio_edad_sel.get()
+        if sel in BIOQ_COLUMNAS_EDAD:
+            return BIOQ_COLUMNAS_EDAD.index(sel)
+        return self._columna_bioq_auto(self._dias_vida())
+
+    def _referencia_bioq(self, prueba):
+        """Devuelve (texto, edad_usada) de la referencia QS para la prueba."""
+        refs = self.bioq_ref[prueba]["refs"]
+        col = self._columna_bioq()
+        texto = refs[col]
+        if not texto:
+            for c in range(4):
+                if refs[c]:
+                    texto, col = refs[c], c
+                    break
+        return texto, BIOQ_COLUMNAS_EDAD[col]
+
+    def _actualizar_ref_label(self, prueba):
+        texto, edad_uso = self._referencia_bioq(prueba)
+        if texto and edad_uso != BIOQ_COLUMNAS_EDAD[self._columna_bioq()]:
+            vista = f"{texto} [{edad_uso}]"
+        else:
+            vista = texto
+        self.bio_ref_label[prueba].config(text=vista)
+
+    def _actualizar_edad_bioquimica(self, *_args):
+        if not hasattr(self, "bio_edad_sel"):
+            return
+        auto = self.bio_edad_sel.get() not in BIOQ_COLUMNAS_EDAD
+        if auto:
+            dias = self._dias_vida()
+            if dias is None:
+                cola = "Complete la fecha de nacimiento para calcular la edad."
+            else:
+                col = self._columna_bioq_auto(dias)
+                cola = f"Edad calculada: {dias} días → referencia de '{BIOQ_COLUMNAS_EDAD[col]}'"
+        else:
+            cola = f"Referencia fija: '{self.bio_edad_sel.get()}'"
+        self.bioq_edad_info.config(text=cola)
+        for p in self.bioq_pruebas:
+            self._actualizar_ref_label(p)
+            self._comparar_bioquimica(p)
 
     # ---------- Pestaña 2 Signos Clínicos (CANS score) ----------
     def _tab_cans(self):
@@ -4344,10 +4559,11 @@ class App(tk.Tk):
             self.visita_tree.delete(item)
         for item in self.farmaco_tree.get_children():
             self.farmaco_tree.delete(item)
-        for item in self.bio_tree.get_children():
-            self.bio_tree.delete(item)
-        for prueba, valor in PRUEBAS:
-            self.bio_tree.insert("", "end", values=(prueba, valor, ""))
+        for var in self.bio_resultado.values():
+            var.set("")
+        if hasattr(self, "bio_edad_sel"):
+            self.bio_edad_sel.set("Automática según edad")
+            self._actualizar_edad_bioquimica()
         self._actualizar_visibilidad_ganancia()
         self.status.config(text="Nueva consulta | Paciente nuevo")
 
@@ -4736,6 +4952,61 @@ class App(tk.Tk):
         else:
             self.status.config(text=f"Editando fármaco-nutriente | Paciente N° {self._paciente_id}")
 
+    def _parse_rango_referencia(self, texto):
+        """Devuelve (bajo, alto) a partir del texto del rango normal; None si no es numérico."""
+        texto = (texto or "").strip()
+        if not texto:
+            return None
+        if "<" in texto:
+            m = re.search(r"([\d]+(?:[.,]\d+)?)", texto)
+            if not m:
+                return None
+            return (None, float(m.group(1).replace(",", ".")))
+        if ">" in texto:
+            m = re.search(r"([\d]+(?:[.,]\d+)?)", texto)
+            if not m:
+                return None
+            return (float(m.group(1).replace(",", ".")), None)
+        m = re.search(r"([\d]+(?:[.,]\d+)?)\s*[-–]\s*([\d]+(?:[.,]\d+)?)", texto)
+        if not m:
+            return None
+        return (
+            float(m.group(1).replace(",", ".")),
+            float(m.group(2).replace(",", ".")),
+        )
+
+    def _comparar_bioquimica(self, prueba, *args):
+        if not hasattr(self, "bio_estado") or prueba not in self.bio_estado:
+            return
+        self._actualizar_ref_label(prueba)
+        texto_ref, _edad_uso = self._referencia_bioq(prueba)
+        rango = self._parse_rango_referencia(texto_ref)
+        texto = self.bio_resultado[prueba].get().strip()
+        lbl = self.bio_estado_label[prueba]
+        if not texto:
+            self.bio_estado[prueba].set("—")
+            lbl.config(foreground="#555555")
+            return
+        try:
+            valor = float(texto.replace(",", "."))
+        except ValueError:
+            self.bio_estado[prueba].set("Valor no numérico")
+            lbl.config(foreground="#B00020")
+            return
+        if rango is None:
+            self.bio_estado[prueba].set("—")
+            lbl.config(foreground="#555555")
+            return
+        bajo, alto = rango
+        if bajo is not None and valor < bajo:
+            estado = "Bajo"
+        elif alto is not None and valor > alto:
+            estado = "Alto"
+        else:
+            estado = "Normal"
+        self.bio_estado[prueba].set(estado)
+        lbl.config(foreground=("#1E6E5C" if estado == "Normal" else "#B00020"))
+
     def _guardar_bioquimica(self):
         if not self._exigir_paciente():
             return
@@ -4743,11 +5014,16 @@ class App(tk.Tk):
             conn = conectar()
             cur = conn.cursor()
             cur.execute("DELETE FROM evaluacion_bioquimica WHERE paciente_id = ?", (self._paciente_id,))
-            for item in self.bio_tree.get_children():
-                prueba, valor_normal, resultado = self.bio_tree.item(item, "values")
+            for prueba in self.bioq_pruebas:
+                resultado = self.bio_resultado[prueba].get().strip()
+                texto_ref, edad_uso = self._referencia_bioq(prueba)
                 cur.execute(
-                    "INSERT INTO evaluacion_bioquimica (paciente_id, prueba, valor_normal, resultado) VALUES (?,?,?,?)",
-                    (self._paciente_id, prueba, valor_normal, resultado),
+                    "INSERT INTO evaluacion_bioquimica "
+                    "(paciente_id, prueba, valor_normal, resultado, comparacion, unidad, referencia_edad) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (self._paciente_id, prueba, texto_ref, resultado,
+                     self.bio_estado[prueba].get().strip() if resultado else "",
+                     self.bioq_ref[prueba]["unidad"], edad_uso),
                 )
             conn.commit()
             conn.close()
@@ -4756,24 +5032,35 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    def _limpiar_bioquimica(self):
+        for var in self.bio_resultado.values():
+            var.set("")
+        self.bio_edad_sel.set("Automática según edad")
+        self._actualizar_edad_bioquimica()
+        self.status.config(text="Evaluación bioquímica reiniciada")
+
     def _editar_bioquimica(self, silencioso=False):
         if silencioso and not getattr(self, "_paciente_id", None):
             return
         if not self._exigir_paciente():
             return
         conn = conectar()
-        filas = conn.execute(
-            "SELECT prueba, valor_normal, resultado FROM evaluacion_bioquimica WHERE paciente_id = ? ORDER BY id",
+        filas = {}
+        for fila in conn.execute(
+            "SELECT prueba, valor_normal, resultado, comparacion, unidad, referencia_edad "
+            "FROM evaluacion_bioquimica WHERE paciente_id = ? ORDER BY id",
             (self._paciente_id,),
-        ).fetchall()
+        ).fetchall():
+            filas[fila[0]] = (fila[1] or "", fila[2] or "", fila[3] or "", fila[4] or "", fila[5] or "")
         conn.close()
-        for item in self.bio_tree.get_children():
-            self.bio_tree.delete(item)
-        for fila in filas:
-            self.bio_tree.insert("", "end", values=(fila[0] or "", fila[1] or "", fila[2] or ""))
-        if not filas:
-            for prueba, valor in PRUEBAS:
-                self.bio_tree.insert("", "end", values=(prueba, valor, ""))
+        cargadas = False
+        for prueba in self.bioq_pruebas:
+            if prueba in filas and filas[prueba][1]:
+                self.bio_resultado[prueba].set(filas[prueba][1])
+                cargadas = True
+            else:
+                self.bio_resultado[prueba].set("")
+        if not cargadas:
             if not silencioso:
                 messagebox.showinfo("Editar", "No hay evaluaciones bioquímicas guardadas para este paciente")
         else:
