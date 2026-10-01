@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS lactmed_meta (
     fecha TEXT
 );
 
+CREATE TABLE IF NOT EXISTS estimacion_energetica (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    grupo TEXT,
+    sexo TEXT,
+    alimentacion TEXT,
+    peso_kg REAL,
+    kcal_dia REAL,
+    detalle TEXT,
+    fecha TEXT
+);
+
 CREATE TABLE IF NOT EXISTS evaluacion_bioquimica (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,

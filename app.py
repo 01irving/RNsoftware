@@ -238,6 +238,34 @@ PRUEBAS = [
 
 BIOQ_COLUMNAS_EDAD = ["Nacimiento", "1 semana", "1 mes", "1 1/2 mes"]
 
+# Ecuaciones de estimación de necesidades energéticas (transcritas de las
+# tablas de las pp. 54-55): FAO/WHO/UNU 2001 para lactantes e Institute of
+# Medicine 2005 para recién nacidos.
+ENERGIA_GRUPO_LACTANTE = "Lactante (FAO/WHO/UNU, 2001)"
+ENERGIA_GRUPO_RN = "Recién nacido (Institute of Medicine, 2005)"
+ENERGIA_GRUPOS = [ENERGIA_GRUPO_LACTANTE, ENERGIA_GRUPO_RN]
+ENERGIA_SEXOS = ["Niño", "Niña"]
+ENERGIA_ALIMENTACIONES = ["Al seno materno", "Sucedáneo de leche humana"]
+ENERGIA_ALIMENTACION_TODAS = "Todos"
+ENERGIA_ALIMENTACIONES_OPCIONES = [ENERGIA_ALIMENTACION_TODAS] + ENERGIA_ALIMENTACIONES
+ENERGIA_ALIMENTACION_NO_APLICA = "No aplica (ecuación para recién nacido)"
+# (a, b, c): energía = a * peso_kg + b + c. Ecuaciones en kilocalorías, tal
+# como figuran en la tabla original (p. 54).
+ENERGIA_LACTANTE = {
+    "Al seno materno": (92.8, -152.0, 196),
+    "Sucedáneo de leche humana": (82.6, -29.0, 196),
+    ENERGIA_ALIMENTACION_TODAS: (88.6, -99.4, 196),
+}
+ENERGIA_RN = {"Niño": (89.0, -100.0, 180), "Niña": (89.0, -100.0, 164)}
+ENERGIA_NOTA = (
+    "Nota: las ecuaciones están en kilocalorías y se transcribieron de las imágenes "
+    "aportadas (pp. 54-55). En el lactante la ecuación depende del tipo de alimentación "
+    "y no del sexo; la tabla etiqueta «Seno materno» como niños y niñas, «Sucedáneo» como "
+    "niña y una tercera fila como «Todos». Verifique la tabla original antes de usarlas "
+    "en decisiones clínicas. Esta herramienta estima requerimientos energéticos y no "
+    "sustituye la valoración individual."
+)
+
 
 CSV_DEFAULT = {
     "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
@@ -1839,10 +1867,68 @@ def _texto_velocidad_oms_28_dias(sexo, dias_observados, peso_nacer_g, peso_actua
     )
 
 
+def _formula_energia(a, b, c):
+    """Escribe el lado derecho de la ecuación, p. ej. ((92.8 × peso) − 152) + 196."""
+    return f"(({_num(a)} × peso) {_signo(b)} {_num(abs(b))}) + {_num(c)}"
+
+
+def estimar_energia(grupo, sexo, alimentacion, peso_kg):
+    """Devuelve (kcal_dia, detalle) con la energía estimada, sólo en kcal/día.
+
+    Recién nacido (IOM 2005) y lactante (FAO/WHO/UNU 2001): la tabla de la
+    fuente está en kilocalorías. En el lactante la ecuación depende del tipo
+    de alimentación, no del sexo.
+    """
+    if peso_kg <= 0:
+        raise ValueError("El peso debe ser mayor que cero")
+    if sexo not in ENERGIA_SEXOS:
+        raise ValueError("Seleccione el sexo")
+    kcal, lineas = _detalle_energia(grupo, sexo, alimentacion, peso_kg)
+    detalle = "\n".join([f"Grupo: {grupo}"] + lineas)
+    return kcal, detalle
+
+
+def _detalle_energia(grupo, sexo, alimentacion, peso_kg):
+    """Calcula una estimación y devuelve (kcal_día, líneas del detalle)."""
+    if grupo == ENERGIA_GRUPO_RN:
+        a, b, c = ENERGIA_RN[sexo]
+        kcal = (a * peso_kg) + b + c
+        return kcal, [
+            f"Sexo: {sexo}",
+            f"Peso: {peso_kg:.3f} kg",
+            "",
+            f"Fórmula aplicada: {_formula_energia(a, b, c)}",
+            f"Estimación: {kcal:.2f} kcal/día",
+        ]
+
+    if alimentacion not in ENERGIA_ALIMENTACIONES_OPCIONES:
+        raise ValueError("Seleccione el tipo de alimentación")
+    a, b, c = ENERGIA_LACTANTE[alimentacion]
+    kcal = (a * peso_kg) + b + c
+    return kcal, [
+        f"Sexo: {sexo}",
+        f"Tipo de alimentación: {alimentacion}",
+        f"Peso: {peso_kg:.3f} kg",
+        "",
+        f"Fórmula aplicada: {_formula_energia(a, b, c)}",
+        f"Estimación: {kcal:.2f} kcal/día",
+    ]
+
+
+def _num(valor):
+    """Formatea un coeficiente de las ecuaciones sin decimales sobrantes."""
+    texto = f"{valor:g}"
+    return texto
+
+
+def _signo(valor):
+    return "+" if valor >= 0 else "−"
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Historia Clínica Nutricional Pediátrica (1-4)")
+        self.title("Historia Clínica Nutricional Pediátrica (1-5)")
         self.geometry("900x640")
         self._paciente_id = None
         self._edit_paciente_id = None
@@ -2084,6 +2170,14 @@ class App(tk.Tk):
                     conn.execute(f"ALTER TABLE paciente DROP COLUMN {col_vieja}")
                 except sqlite3.OperationalError:
                     pass
+        col_energia = [
+            fila[1] for fila in conn.execute("PRAGMA table_info(estimacion_energetica)")
+        ]
+        if "mj_dia" in col_energia:
+            try:
+                conn.execute("ALTER TABLE estimacion_energetica DROP COLUMN mj_dia")
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
 
     def _cargar_referencias(self, conn):
@@ -2351,6 +2445,7 @@ class App(tk.Tk):
         self._tab_cans()
         self._tab_farmaco()
         self._tab_bioquimica()
+        self._tab_ecuaciones()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -2953,6 +3048,197 @@ class App(tk.Tk):
         self.farmaco_card_sel = None
         self.farmaco_interior.update_idletasks()
         self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
+
+    # ---------- Pestaña 5 Ecuaciones Predictivas ----------
+    def _tab_ecuaciones(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="5. Ecuaciones Predictivas")
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="Necesidades energéticas:").pack(side="left", padx=5)
+        ttk.Button(barra, text="Calcular estimación", command=self._calcular_energia).pack(side="left", padx=3)
+        ttk.Button(barra, text="Usar datos del paciente", command=self._usar_datos_paciente_energia).pack(
+            side="left", padx=3)
+        ttk.Button(barra, text="Guardar", command=self._guardar_energia).pack(side="left", padx=3)
+        ttk.Button(barra, text="Editar", command=self._editar_energia).pack(side="left", padx=3)
+        ttk.Button(barra, text="Limpiar", command=self._limpiar_energia).pack(side="left", padx=3)
+
+        form = ttk.LabelFrame(tab, text="Datos de entrada")
+        form.pack(fill="x", padx=8, pady=4)
+        form.columnconfigure(1, weight=1)
+
+        self.ener_grupo = tk.StringVar(value=ENERGIA_GRUPO_LACTANTE)
+        self.ener_sexo = tk.StringVar(value="Niño")
+        self.ener_alimentacion = tk.StringVar(value=ENERGIA_ALIMENTACION_TODAS)
+        self.ener_peso = tk.StringVar()
+        self.ener_resultado = {"calculado": False, "kcal": None, "detalle": ""}
+
+        ttk.Label(form, text="Grupo / fuente:").grid(row=0, column=0, sticky="w", padx=6, pady=5)
+        combo_grupo = ttk.Combobox(
+            form, textvariable=self.ener_grupo, state="readonly", values=ENERGIA_GRUPOS)
+        combo_grupo.grid(row=0, column=1, sticky="ew", padx=6, pady=5)
+        ttk.Label(form, text="Sexo:").grid(row=1, column=0, sticky="w", padx=6, pady=5)
+        self.ener_combo_sexo = ttk.Combobox(
+            form, textvariable=self.ener_sexo, state="readonly", width=34, values=ENERGIA_SEXOS)
+        self.ener_combo_sexo.grid(row=1, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(form, text="Tipo de alimentación:").grid(row=2, column=0, sticky="w", padx=6, pady=5)
+        self.ener_combo_alim = ttk.Combobox(
+            form, textvariable=self.ener_alimentacion, state="readonly", width=34,
+            values=ENERGIA_ALIMENTACIONES_OPCIONES)
+        self.ener_combo_alim.grid(row=2, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(form, text="Peso actual (kg):").grid(row=3, column=0, sticky="w", padx=6, pady=5)
+        self.ener_entry_peso = ttk.Entry(form, textvariable=self.ener_peso, width=18)
+        self.ener_entry_peso.grid(row=3, column=1, sticky="w", padx=6, pady=5)
+        self.ener_entry_peso.bind("<Return>", lambda _e: self._calcular_energia())
+
+        salida = ttk.LabelFrame(tab, text="Resultado")
+        salida.pack(fill="both", expand=True, padx=8, pady=4)
+        self.ener_texto = tk.Text(
+            salida, height=14, wrap="word", font=("Consolas", 10),
+            highlightthickness=1, relief="solid")
+        self.ener_texto.pack(fill="both", expand=True, padx=6, pady=6)
+        self.ener_texto.insert(
+            "1.0",
+            "Recién nacidos y lactantes · resultados en kcal/día\n\n"
+            "Complete los datos y pulse «Calcular estimación».",
+        )
+        self.ener_texto.configure(state="disabled")
+
+        ttk.Label(tab, text=ENERGIA_NOTA, wraplength=900, foreground="#555555").pack(
+            anchor="w", padx=10, pady=(0, 8))
+
+        self.ener_grupo.trace_add("write", self._actualizar_energia_alimentacion)
+        self._actualizar_energia_alimentacion()
+
+    def _actualizar_energia_alimentacion(self, *_args):
+        """En recién nacido la alimentación no aplica y el combo queda bloqueado."""
+        if self.ener_grupo.get() == ENERGIA_GRUPO_RN:
+            self.ener_combo_alim.configure(state="disabled")
+            self.ener_alimentacion.set(ENERGIA_ALIMENTACION_NO_APLICA)
+            return
+        if self.ener_alimentacion.get() not in ENERGIA_ALIMENTACIONES_OPCIONES:
+            self.ener_alimentacion.set(ENERGIA_ALIMENTACION_TODAS)
+        self.ener_combo_alim.configure(state="readonly")
+
+    def _peso_energia_kg(self):
+        """Peso en kg desde el campo, aceptando gramos; None si no es válido."""
+        texto = self.ener_peso.get().strip().replace(",", ".")
+        if not texto:
+            return None
+        try:
+            peso = float(texto)
+        except ValueError:
+            return None
+        if peso <= 0:
+            return None
+        return peso / 1000.0 if peso > 10 else peso
+
+    def _escribir_energia(self, texto):
+        self.ener_texto.configure(state="normal")
+        self.ener_texto.delete("1.0", "end")
+        self.ener_texto.insert("1.0", texto)
+        self.ener_texto.configure(state="disabled")
+
+    def _calcular_energia(self):
+        peso = self._peso_energia_kg()
+        if peso is None:
+            messagebox.showerror(
+                "Dato inválido", "Introduzca un peso válido en kg, mayor que cero.")
+            return
+        grupo = self.ener_grupo.get()
+        sexo = self.ener_sexo.get()
+        alimentacion = self.ener_alimentacion.get()
+        try:
+            kcal, detalle = estimar_energia(grupo, sexo, alimentacion, peso)
+        except ValueError as e:
+            messagebox.showerror("Dato inválido", str(e))
+            return
+        self.ener_resultado = {
+            "calculado": True, "kcal": round(kcal, 2), "detalle": detalle,
+        }
+        self._escribir_energia(detalle)
+        self.status.config(text=f"Energía estimada: {kcal:.2f} kcal/día")
+
+    def _usar_datos_paciente_energia(self):
+        self.ener_sexo.set("Niño" if self.sexo.get() == "Masculino" else "Niña")
+        gramos = self._peso_actual_g_guardado()
+        if not gramos:
+            messagebox.showwarning(
+                "Peso",
+                "No hay un peso actual registrado.\nCargue el peso en la pestaña de "
+                "antropometría o ingréselo manualmente aquí.",
+            )
+            return
+        self.ener_peso.set(f"{gramos / 1000.0:.3f}".rstrip("0").rstrip("."))
+        self._calcular_energia()
+
+    def _limpiar_energia(self):
+        self.ener_grupo.set(ENERGIA_GRUPO_LACTANTE)
+        self.ener_sexo.set("Niño")
+        self.ener_peso.set("")
+        self.ener_resultado = {"calculado": False, "kcal": None, "detalle": ""}
+        self.ener_alimentacion.set(ENERGIA_ALIMENTACION_TODAS)
+        self._actualizar_energia_alimentacion()
+        self._escribir_energia(
+            "Complete los datos y pulse «Calcular estimación».")
+
+    def _guardar_energia(self):
+        if not self._exigir_paciente():
+            return
+        if not self.ener_resultado.get("calculado"):
+            self._calcular_energia()
+            if not self.ener_resultado.get("calculado"):
+                return
+        try:
+            conn = conectar()
+            conn.execute(
+                """INSERT INTO estimacion_energetica
+                   (paciente_id, grupo, sexo, alimentacion, peso_kg, kcal_dia, detalle,
+                    fecha)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    self._paciente_id, self.ener_grupo.get(), self.ener_sexo.get(),
+                    self.ener_alimentacion.get(), self._peso_energia_kg(),
+                    self.ener_resultado["kcal"],
+                    self.ener_resultado["detalle"], date.today().isoformat(),
+                ),
+            )
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Estimación energética guardada | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Estimación de necesidades energéticas guardada")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_energia(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        fila = conn.execute(
+            """SELECT grupo, sexo, alimentacion, peso_kg, kcal_dia, detalle
+               FROM estimacion_energetica WHERE paciente_id = ? ORDER BY id DESC LIMIT 1""",
+            (self._paciente_id,),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay estimaciones guardadas para este paciente")
+            return
+        self.ener_grupo.set(fila[0] or ENERGIA_GRUPO_LACTANTE)
+        self.ener_sexo.set(fila[1] if fila[1] in ENERGIA_SEXOS else "Niño")
+        if fila[2] in ENERGIA_ALIMENTACIONES_OPCIONES:
+            self.ener_alimentacion.set(fila[2])
+        if fila[3] is not None:
+            self.ener_peso.set(f"{float(fila[3]):.3f}".rstrip("0").rstrip("."))
+        self.ener_resultado = {"calculado": True, "kcal": fila[4],
+                               "detalle": fila[5] or ""}
+        self._escribir_energia(fila[5] or "Sin detalle guardado")
+        self.status.config(
+            text=f"Editando estimación energética | Paciente N° {self._paciente_id}")
 
     # ---------- Pestaña 4 Evaluación Bioquímica ----------
     def _tab_bioquimica(self):
@@ -4781,6 +5067,7 @@ class App(tk.Tk):
         if hasattr(self, "bio_edad_sel"):
             self.bio_edad_sel.set("Automática según edad")
             self._actualizar_edad_bioquimica()
+        self._limpiar_energia()
         self._actualizar_visibilidad_ganancia()
         self.status.config(text="Nueva consulta | Paciente nuevo")
 
