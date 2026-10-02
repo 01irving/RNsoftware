@@ -266,6 +266,76 @@ ENERGIA_NOTA = (
     "sustituye la valoración individual."
 )
 
+# Encuesta «Taking a Feeding History»: preguntas y verificaciones cruzadas
+# para una historia de alimentación precisa. Las secciones se muestran según
+# el grupo etario y el tipo de alimentación declarados.
+RECUENTO_GRUPO_LACTANTE = "Lactante"
+RECUENTO_GRUPO_MAYOR = "Niño mayor"
+RECUENTO_GRUPOS = [RECUENTO_GRUPO_LACTANTE, RECUENTO_GRUPO_MAYOR]
+RECUENTO_TIPO_MATERNA = "Lactancia materna"
+RECUENTO_TIPO_SUCEDANEO = "Sucedáneo de leche humana"
+RECUENTO_TIPO_MIXTA = "Lactancia materna y succeedáneo"
+RECUENTO_TIPO_OTRA = "Otra leche o dieta"
+RECUENTO_TIPO_NO_APLICA = "No aplica (niño mayor)"
+RECUENTO_TIPOS_LACTANTE = [
+    RECUENTO_TIPO_MATERNA, RECUENTO_TIPO_SUCEDANEO, RECUENTO_TIPO_MIXTA,
+    RECUENTO_TIPO_OTRA,
+]
+RECUENTO_TIPOS_TODOS = RECUENTO_TIPOS_LACTANTE + [RECUENTO_TIPO_NO_APLICA]
+RECUENTO_SI_NO = ["Sí", "No"]
+RECUENTO_TIPO_TEXTO = "texto"
+RECUENTO_TIPO_SI_NO = "si_no"
+RECUENTO_TIPO_NUMERO = "numero"
+RECUENTO_TIPO_LARGO = "largo"
+RECUENTO_INTERVALOS = ["Cada 2 h", "Cada 3 h", "Cada 4 h", "Irregular"]
+# (clave, etiqueta, tipo de campo). Se guardan solo las contestadas.
+RECUENTO_SECCIONES = [
+    ("A. Lactante alimentado con leche materna", "materna", [
+        ("lm_frecuencia", "¿Con qué frecuencia se amamanta y cuánto tiempo en cada pecho?",
+         RECUENTO_TIPO_TEXTO),
+        ("lm_posicion", "¿Se verificaron posición y técnica de la lactancia?", RECUENTO_TIPO_SI_NO),
+        ("lm_suplementos", "¿Se ofrecen mamaderas suplementarias u otros alimentos?",
+         RECUENTO_TIPO_SI_NO),
+        ("lm_suplementos_detalle", "¿Qué mamaderas o alimentos se ofrecen además?",
+         RECUENTO_TIPO_TEXTO),
+    ]),
+    ("B. Lactante alimentado con succeedáneo", "formula", [
+        ("f_tipo_formula", "¿Qué tipo de fórmula se utiliza?", RECUENTO_TIPO_TEXTO),
+        ("f_preparacion", "¿Cómo se prepara la toma y a qué concentración? (concentrado o "
+                         "diluida,Verifyor el contenido energético final)", RECUENTO_TIPO_TEXTO),
+        ("f_energia_100ml", "Contenido energético final de la mezcla (kcal/100 ml)",
+         RECUENTO_TIPO_NUMERO),
+        ("f_fresca", "¿Se prepara cada toma en el momento?", RECUENTO_TIPO_SI_NO),
+        ("f_tomas_24h", "¿Cuántas tomas se ofrecen en 24 h?", RECUENTO_TIPO_NUMERO),
+        ("f_intervalo", "¿Con qué frecuencia se ofrecen las tomas?", RECUENTO_TIPO_TEXTO),
+        ("f_volumen_ofrecido", "¿Qué volumen se ofrece en cada toma (ml)?", RECUENTO_TIPO_TEXTO),
+        ("f_volumen_tomado", "¿Cuánto se toma realmente de lo ofrecido?", RECUENTO_TIPO_TEXTO),
+        ("f_duracion", "¿Cuánto tarda la toma?", RECUENTO_TIPO_TEXTO),
+        ("f_agregados", "¿Se agrega algo más al biberón?", RECUENTO_TIPO_SI_NO),
+        ("f_agregados_detalle", "¿Qué se agrega al biberón?", RECUENTO_TIPO_TEXTO),
+    ]),
+    ("C. Niño mayor", "mayor", [
+        ("n_comidas_meriendas", "¿Cuántas comidas y meriendas come al día?", RECUENTO_TIPO_NUMERO),
+        ("n_patron", "¿Qué come en cada comida y merienda? (muestra de 1 o 2 días)",
+         RECUENTO_TIPO_LARGO),
+        ("n_apetito", "¿Cómo describen los padres el apetito del niño?", RECUENTO_TIPO_TEXTO),
+        ("n_lugar", "¿Dónde ingiere las comidas?", RECUENTO_TIPO_TEXTO),
+        ("n_comidas_familiares", "¿Hay comidas familiares?", RECUENTO_TIPO_SI_NO),
+        ("n_ambiente", "¿Son situaciones agradables y placeleras?", RECUENTO_TIPO_SI_NO),
+        ("n_leche", "¿Cuánta leche ingiere?", RECUENTO_TIPO_TEXTO),
+        ("n_jugo", "¿Cuánto jugo ingiere?", RECUENTO_TIPO_TEXTO),
+        ("n_meriendas", "¿Con qué frecuencia come meriendas o alimentos de merienda?",
+         RECUENTO_TIPO_TEXTO),
+    ]),
+]
+RECUENTO_NOTA = (
+    "Nota: una historia de alimentación cuidadosa es parte esencial de la "
+    "valoración nutricional. Las preguntas y verificaciones cruzadas son las de "
+    "«Taking a Feeding History»; obtenga una muestra de 1 o 2 días del patrón "
+    "alimentario cuando el niño sea mayor. Este registro documenta la entrevista y "
+    "no sustituye la valoración nutricional individual."
+)
+
 
 CSV_DEFAULT = {
     "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
@@ -1928,7 +1998,7 @@ def _signo(valor):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Historia Clínica Nutricional Pediátrica (1-5)")
+        self.title("Historia Clínica Nutricional Pediátrica (1-6)")
         self.geometry("900x640")
         self._paciente_id = None
         self._edit_paciente_id = None
@@ -2446,6 +2516,7 @@ class App(tk.Tk):
         self._tab_farmaco()
         self._tab_bioquimica()
         self._tab_ecuaciones()
+        self._tab_recuento()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -3239,6 +3310,335 @@ class App(tk.Tk):
         self._escribir_energia(fila[5] or "Sin detalle guardado")
         self.status.config(
             text=f"Editando estimación energética | Paciente N° {self._paciente_id}")
+
+    # ---------- Pestaña 6 Recuento Alimentario ----------
+    def _tab_recuento(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="6. Recuento Alimentario")
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="Historia de alimentación:").pack(side="left", padx=5)
+        ttk.Button(barra, text="Ver resumen", command=self._resumen_recuento).pack(side="left", padx=3)
+        ttk.Button(barra, text="Guardar", command=self._guardar_recuento).pack(side="left", padx=3)
+        ttk.Button(barra, text="Editar", command=self._editar_recuento).pack(side="left", padx=3)
+        ttk.Button(barra, text="Limpiar", command=self._limpiar_recuento).pack(side="left", padx=3)
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._canvas_recuento = canvas
+
+        def _actualizar_scroll(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _ancho_scroll(_event=None):
+            canvas.itemconfigure(ventana, width=_event.width)
+
+        def _rueda(_event):
+            canvas.yview_scroll(int(-_event.delta / 120), "units")
+
+        def _cambio_tab(_event=None):
+            if self.notebook.select() == tab:
+                canvas.bind_all("<MouseWheel>", _rueda)
+            else:
+                canvas.unbind_all("<MouseWheel>")
+
+        interior.bind("<Configure>", _actualizar_scroll)
+        canvas.bind("<Configure>", _ancho_scroll)
+        self.notebook.bind("<<NotebookTabChanged>>", _cambio_tab)
+        tab.bind("<Map>", _cambio_tab)
+        tab.bind("<Unmap>", _cambio_tab)
+        tab.bind("<Destroy>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        marco = ttk.LabelFrame(interior, text="Alimentación del niño")
+        marco.pack(fill="x", padx=8, pady=4)
+        marco.columnconfigure(1, weight=1)
+        ttk.Label(marco, text="Grupo:").grid(row=0, column=0, sticky="w", padx=6, pady=5)
+        self.rec_grupo = tk.StringVar(value=RECUENTO_GRUPO_LACTANTE)
+        ttk.Combobox(
+            marco, textvariable=self.rec_grupo, state="readonly", width=30,
+            values=RECUENTO_GRUPOS).grid(row=0, column=1, sticky="ew", padx=6, pady=5)
+        ttk.Label(marco, text="Alimentación:").grid(row=1, column=0, sticky="w", padx=6, pady=5)
+        self.rec_tipo = tk.StringVar(value=RECUENTO_TIPO_MATERNA)
+        self.rec_combo_tipo = ttk.Combobox(
+            marco, textvariable=self.rec_tipo, state="readonly", width=30,
+            values=RECUENTO_TIPOS_LACTANTE)
+        self.rec_combo_tipo.grid(row=1, column=1, sticky="ew", padx=6, pady=5)
+        ttk.Label(marco, text="Fecha de entrevista:").grid(row=2, column=0, sticky="w", padx=6, pady=5)
+        self.rec_fecha = tk.StringVar(value=date.today().isoformat())
+        ttk.Entry(marco, textvariable=self.rec_fecha, width=18).grid(
+            row=2, column=1, sticky="w", padx=6, pady=5)
+        self.rec_grupo.trace_add("write", self._actualizar_recuento_secciones)
+        self.rec_tipo.trace_add("write", self._actualizar_recuento_secciones)
+
+        self.rec_vars = {}
+        self.rec_textos = {}
+        for titulo, seccion, preguntas in RECUENTO_SECCIONES:
+            marco_s = ttk.LabelFrame(interior, text=titulo)
+            marco_s.pack(fill="x", padx=8, pady=4)
+            marco_s.columnconfigure(1, weight=1)
+            for i, (clave, etiqueta, tipo) in enumerate(preguntas):
+                ttk.Label(marco_s, text=etiqueta).grid(
+                    row=i, column=0, sticky="w", padx=6, pady=4)
+                if tipo == RECUENTO_TIPO_SI_NO:
+                    var = tk.StringVar()
+                    ttk.Combobox(
+                        marco_s, textvariable=var, state="readonly", width=10,
+                        values=RECUENTO_SI_NO).grid(row=i, column=1, sticky="w", padx=6, pady=4)
+                elif tipo == RECUENTO_TIPO_NUMERO:
+                    var = tk.StringVar()
+                    ttk.Entry(marco_s, textvariable=var, width=10).grid(
+                        row=i, column=1, sticky="w", padx=6, pady=4)
+                elif tipo == RECUENTO_TIPO_LARGO:
+                    var = tk.StringVar()
+                    box = tk.Text(marco_s, height=5, width=40, wrap="word")
+                    box.grid(row=i, column=1, sticky="ew", padx=6, pady=4)
+                    self.rec_textos[clave] = box
+                else:
+                    var = tk.StringVar()
+                    ttk.Entry(marco_s, textvariable=var, width=40).grid(
+                        row=i, column=1, sticky="ew", padx=6, pady=4)
+                self.rec_vars[clave] = var
+                if clave == "f_intervalo":
+                    var.trace_add("write", self._completar_intervalo_recuento)
+
+        marco_obs = ttk.LabelFrame(interior, text="Observaciones")
+        marco_obs.pack(fill="x", padx=8, pady=4)
+        self.rec_observaciones = tk.Text(marco_obs, height=4, wrap="word")
+        self.rec_observaciones.pack(fill="x", padx=6, pady=6)
+
+        marco_salida = ttk.LabelFrame(interior, text="Resumen de la entrevista")
+        marco_salida.pack(fill="both", expand=True, padx=8, pady=4)
+        self.rec_texto = tk.Text(marco_salida, height=12, wrap="word")
+        self.rec_texto.pack(fill="both", expand=True, padx=6, pady=6)
+        self.rec_texto.configure(state="disabled")
+
+        ttk.Label(interior, text=RECUENTO_NOTA, wraplength=880, foreground="#555555").pack(
+            anchor="w", padx=10, pady=(0, 8))
+
+        self._rec_grupos_visibles = None
+        self._actualizar_recuento_secciones()
+
+    def _completar_intervalo_recuento(self, *_args):
+        """Sugiere el intervalo («cada 2 h»…) a partir del número de tomas."""
+        texto = self.rec_vars["f_tomas_24h"].get().strip()
+        if self.rec_vars["f_intervalo"].get().strip() or not texto:
+            return
+        try:
+            tomas = float(texto.replace(",", "."))
+        except ValueError:
+            return
+        if tomas > 0:
+            self.rec_vars["f_intervalo"].set(f"Cada {24.0 / tomas:.1f} h")
+
+    def _secciones_recuento_visibles(self):
+        """Secciones que aplican según grupo y tipo de alimentación."""
+        if self.rec_grupo.get() == RECUENTO_GRUPO_MAYOR:
+            return {"mayor"}
+        tipo = self.rec_tipo.get()
+        visibles = {"mayor"}
+        if tipo == RECUENTO_TIPO_MATERNA:
+            visibles.add("materna")
+        elif tipo == RECUENTO_TIPO_SUCEDANEO:
+            visibles.add("formula")
+        else:
+            visibles.update({"materna", "formula"})
+        return visibles
+
+    def _actualizar_recuento_secciones(self, *_args):
+        """Muestra u oculta las secciones según el grupo y la alimentación."""
+        lactante = self.rec_grupo.get() == RECUENTO_GRUPO_LACTANTE
+        if lactante and self.rec_tipo.get() == RECUENTO_TIPO_NO_APLICA:
+            self.rec_tipo.set(RECUENTO_TIPO_MATERNA)
+        if not lactante:
+            self.rec_tipo.set(RECUENTO_TIPO_NO_APLICA)
+            self.rec_combo_tipo.configure(values=[RECUENTO_TIPO_NO_APLICA], state="disabled")
+        else:
+            self.rec_combo_tipo.configure(values=RECUENTO_TIPOS_LACTANTE, state="readonly")
+        visibles = self._secciones_recuento_visibles()
+        self._actualizar_filas_recuento(visibles)
+
+    def _actualizar_filas_recuento(self, visibles):
+        """Activa o desactiva las filas de preguntas no aplicables."""
+        if visibles == self._rec_grupos_visibles:
+            return
+        self._rec_grupos_visibles = visibles
+        for _titulo, seccion, preguntas in RECUENTO_SECCIONES:
+            activa = seccion in visibles
+            for clave, _etiqueta, _tipo in preguntas:
+                if clave in self.rec_textos:
+                    estado = "normal" if activa else "disabled"
+                    self.rec_textos[clave].configure(state=estado)
+                else:
+                    var = self.rec_vars[clave]
+                    if activa:
+                        if not var.get():
+                            var.set("")
+                    else:
+                        var.set("")
+
+    def _respuestas_recuento(self):
+        """Respuestas contestadas de las secciones visibles, por clave."""
+        self.rec_texto.configure(state="normal")
+        datos = {}
+        for _titulo, seccion, preguntas in RECUENTO_SECCIONES:
+            if seccion not in self._rec_grupos_visibles:
+                continue
+            for clave, _etiqueta, _tipo in preguntas:
+                if clave in self.rec_textos:
+                    valor = self.rec_textos[clave].get("1.0", "end").strip()
+                else:
+                    valor = self.rec_vars[clave].get().strip()
+                if valor:
+                    datos[clave] = valor
+        return datos
+
+    def _escribir_recuento(self, texto):
+        self.rec_texto.configure(state="normal")
+        self.rec_texto.delete("1.0", "end")
+        self.rec_texto.insert("1.0", texto)
+        self.rec_texto.configure(state="disabled")
+
+    def _resumen_recuento(self):
+        self._respuestas_recuento()
+        visibles = self._rec_grupos_visibles
+        lineas = [
+            f"Fecha de entrevista: {self.rec_fecha.get().strip()}",
+            f"Grupo: {self.rec_grupo.get()}",
+            f"Alimentación: {self.rec_tipo.get()}",
+        ]
+        for titulo, seccion, preguntas in RECUENTO_SECCIONES:
+            if seccion not in visibles:
+                continue
+            contestadas = [
+                p for p in preguntas
+                if (self.rec_textos[p[0]].get("1.0", "end").strip()
+                    if p[0] in self.rec_textos else self.rec_vars[p[0]].get().strip())
+            ]
+            if not contestadas:
+                continue
+            lineas.append("")
+            lineas.append(titulo)
+            for clave, etiqueta, _tipo in contestadas:
+                valor = (self.rec_textos[clave].get("1.0", "end").strip()
+                         if clave in self.rec_textos else self.rec_vars[clave].get().strip())
+                lineas.append(f"  · {etiqueta} {valor}")
+        total = sum(
+            1 for _t, s, qs in RECUENTO_SECCIONES if s in visibles for _c, _e, _ti in qs
+            if (self.rec_textos[_c].get("1.0", "end").strip()
+                if _c in self.rec_textos else self.rec_vars[_c].get().strip())
+        )
+        lineas.append("")
+        lineas.append(f"Preguntas contestadas: {total}")
+        lineas.append("")
+        lineas.append(RECUENTO_NOTA)
+        self._escribir_recuento("\n".join(lineas))
+        self.status.config(text=f"Resumen del recuento alimentario | {total} respuestas")
+
+    def _limpiar_recuento(self):
+        self.rec_grupo.set(RECUENTO_GRUPO_LACTANTE)
+        self.rec_tipo.set(RECUENTO_TIPO_MATERNA)
+        self.rec_fecha.set(date.today().isoformat())
+        for clave, var in self.rec_vars.items():
+            var.set("")
+        for box in self.rec_textos.values():
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+        self.rec_observaciones.delete("1.0", "end")
+        self._rec_grupos_visibles = None
+        self._actualizar_recuento_secciones()
+        self._escribir_recuento(
+            "Complete las preguntas que apliquen y pulse «Ver resumen».\n")
+
+    def _guardar_recuento(self):
+        if not self._exigir_paciente():
+            return
+        datos = self._respuestas_recuento()
+        if not datos:
+            messagebox.showwarning(
+                "Datos", "Complete al menos una pregunta del recuento alimentario.")
+            return
+        try:
+            conn = conectar()
+            anterior = conn.execute(
+                "SELECT id FROM recuento_alimentario WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,),
+            ).fetchone()
+            valores = (
+                self.rec_fecha.get().strip(), self.rec_grupo.get(), self.rec_tipo.get(),
+                json.dumps(datos, ensure_ascii=False),
+                self.rec_observaciones.get("1.0", "end").strip(),
+            )
+            if anterior:
+                conn.execute(
+                    """UPDATE recuento_alimentario
+                       SET fecha_entrevista=?, grupo=?, tipo_alimentacion=?,
+                           respuestas_json=?, observaciones=?
+                       WHERE id=?""",
+                    (*valores, anterior[0]),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO recuento_alimentario
+                       (paciente_id, fecha_entrevista, grupo, tipo_alimentacion,
+                        respuestas_json, observaciones)
+                       VALUES (?,?,?,?,?,?)""",
+                    (self._paciente_id, *valores),
+                )
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Recuento alimentario guardado | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Historia de alimentación guardada")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_recuento(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        fila = conn.execute(
+            """SELECT fecha_entrevista, grupo, tipo_alimentacion, respuestas_json,
+                      observaciones
+               FROM recuento_alimentario WHERE paciente_id = ? ORDER BY id DESC LIMIT 1""",
+            (self._paciente_id,),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay recuentos guardados para este paciente")
+            return
+        self.rec_fecha.set(fila[0] or date.today().isoformat())
+        self.rec_grupo.set(fila[1] if fila[1] in RECUENTO_GRUPOS else RECUENTO_GRUPO_LACTANTE)
+        self.rec_tipo.set(fila[2] if fila[2] in RECUENTO_TIPOS_LACTANTE else RECUENTO_TIPO_MATERNA)
+        self._rec_grupos_visibles = None
+        self._actualizar_recuento_secciones()
+        try:
+            datos = json.loads(fila[3] or "{}")
+        except ValueError:
+            datos = {}
+        for clave, valor in datos.items():
+            if clave in self.rec_textos:
+                box = self.rec_textos[clave]
+                box.configure(state="normal")
+                box.delete("1.0", "end")
+                box.insert("1.0", valor)
+            elif clave in self.rec_vars:
+                self.rec_vars[clave].set(valor)
+        self.rec_observaciones.delete("1.0", "end")
+        self.rec_observaciones.insert("1.0", fila[4] or "")
+        self.status.config(
+            text=f"Editando recuento alimentario | Paciente N° {self._paciente_id}")
 
     # ---------- Pestaña 4 Evaluación Bioquímica ----------
     def _tab_bioquimica(self):
@@ -5068,6 +5468,7 @@ class App(tk.Tk):
             self.bio_edad_sel.set("Automática según edad")
             self._actualizar_edad_bioquimica()
         self._limpiar_energia()
+        self._limpiar_recuento()
         self._actualizar_visibilidad_ganancia()
         self.status.config(text="Nueva consulta | Paciente nuevo")
 
@@ -5584,6 +5985,7 @@ class App(tk.Tk):
         self._editar_cans(silencioso=True)
         self._editar_farmaco(silencioso=True)
         self._editar_bioquimica(silencioso=True)
+        self._editar_recuento(silencioso=True)
         self.status.config(
             text=f"Datos de antecedentes, signos clínicos, fármacos y bioquímica cargados | Paciente N° {self._paciente_id}"
         )

@@ -268,3 +268,15 @@ CREATE TABLE IF NOT EXISTS evaluacion_desarrollo_motor (
     fecha_registro TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_desarrollo_motor_paciente ON evaluacion_desarrollo_motor(paciente_id);
+
+CREATE TABLE IF NOT EXISTS recuento_alimentario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    fecha_entrevista TEXT,
+    grupo TEXT,
+    tipo_alimentacion TEXT,
+    respuestas_json TEXT,
+    observaciones TEXT,
+    fecha_registro TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_recuento_paciente ON recuento_alimentario(paciente_id);
