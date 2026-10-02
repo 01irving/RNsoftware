@@ -347,6 +347,18 @@ RECUENTO_NOTA = (
     "no sustituye la valoración nutricional individual."
 )
 
+# SMAE-5: registro por tiempos de comida
+RECUENTO_COMIDAS = [
+    ("desayuno", "Desayuno"),
+    ("media_manana", "Media mañana"),
+    ("comida", "Comida/Almuerzo"),
+    ("merienda", "Merienda"),
+    ("cena", "Cena"),
+    ("otros", "Refrigerio/Otros"),
+]
+RECUENTO_COMIDAS_CLAVES = [c[0] for c in RECUENTO_COMIDAS]
+RECUENTO_COMIDAS_ETIQUETAS = {c[0]: c[1] for c in RECUENTO_COMIDAS}
+
 
 CSV_DEFAULT = {
     "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
@@ -3334,6 +3346,7 @@ class App(tk.Tk):
         ttk.Button(barra, text="Guardar", command=self._guardar_recuento).pack(side="left", padx=3)
         ttk.Button(barra, text="Editar", command=self._editar_recuento).pack(side="left", padx=3)
         ttk.Button(barra, text="Limpiar", command=self._limpiar_recuento).pack(side="left", padx=3)
+        ttk.Button(barra, text="Imprimir PDF", command=self._imprimir_recuento_pdf).pack(side="left", padx=3)
 
         contenedor = ttk.Frame(tab)
         contenedor.pack(fill="both", expand=True)
@@ -3745,9 +3758,84 @@ class App(tk.Tk):
         self.rec_observaciones.delete("1.0", "end")
         self.rec_observaciones.insert("1.0", fila[4] or "")
         self.status.config(
-            text=f"Editando recuento alimentario | Paciente N° {self._paciente_id}")
+            text=f"Editando recuento alimentario | Paciente N� {self._paciente_id}")
 
-    # ---------- Pestaña 4 Evaluación Bioquímica ----------
+    def _imprimir_recuento_pdf(self):
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.units import cm
+            import os
+            from datetime import datetime
+            if not getattr(self, "_paciente_id", None):
+                if not self._exigir_paciente():
+                    return
+            conn = conectar()
+            fila_p = conn.execute("SELECT nombre, dni_hc, fecha_nacimiento, sexo FROM paciente WHERE id = ?", (self._paciente_id,)).fetchone()
+            conn.close()
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            sugerencia = "recuento_" + ts + ".pdf"
+            ruta = filedialog.asksaveasfilename(parent=self, title="Guardar Recuento Alimentario en PDF", initialfile=sugerencia, defaultextension=".pdf", filetypes=[("Archivo PDF", "*.pdf")])
+            if not ruta:
+                return
+            doc = SimpleDocTemplate(ruta, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+            styles = getSampleStyleSheet()
+            elements = []
+            elements.append(Paragraph("RECUENTO ALIMENTARIO - HISTORIA DE ALIMENTACION", styles["Title"]))
+            elements.append(Spacer(1, 0.3*cm))
+            datos_paciente = []
+            if fila_p:
+                if fila_p[0]:
+                    datos_paciente.append(["Paciente:", fila_p[0]])
+                if fila_p[1]:
+                    datos_paciente.append(["DNI/HC:", fila_p[1]])
+                if fila_p[2]:
+                    datos_paciente.append(["Fecha de nacimiento:", fila_p[2] or ""])
+                if fila_p[3]:
+                    datos_paciente.append(["Sexo:", fila_p[3]])
+            datos_paciente.append(["Fecha/Hora de generacion:", fecha_hora])
+            tabla_p = Table(datos_paciente, colWidths=[4*cm, 11*cm])
+            tabla_p.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.5, colors.grey), ("BACKGROUND", (0,0), (0,-1), colors.lightgrey), ("VALIGN", (0,0), (-1,-1), "MIDDLE")]))
+            elements.append(tabla_p)
+            elements.append(Spacer(1, 0.5*cm))
+            elements.append(Paragraph("Datos de la entrevista", styles["Heading2"]))
+            tabla_e = Table([["Fecha de entrevista:", self.rec_fecha.get().strip() or "-"], ["Grupo:", self.rec_grupo.get().strip() or "-"], ["Tipo de alimentacion:", self.rec_tipo.get().strip() or "-"], ["Observaciones:", self.rec_observaciones.get("1.0", "end").strip() or "-"]], colWidths=[4*cm, 11*cm])
+            tabla_e.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.5, colors.grey), ("BACKGROUND", (0,0), (0,-1), colors.lightgrey), ("VALIGN", (0,0), (-1,-1), "MIDDLE")]))
+            elements.append(tabla_e)
+            elements.append(Spacer(1, 0.5*cm))
+            if hasattr(self, "rec_texto"):
+                try:
+                    resumen = self.rec_texto.get("1.0", "end").strip()
+                except Exception:
+                    resumen = ""
+                if resumen:
+                    elements.append(Paragraph("Resumen de la entrevista", styles["Heading2"]))
+                    elements.append(Paragraph(resumen.replace("\n", "<br/>"), styles["Normal"]))
+                    elements.append(Spacer(1, 0.5*cm))
+            elements.append(Paragraph("Registro SMAE-5", styles["Heading2"]))
+            elements.append(Paragraph("Totales por comida y totales del dia", styles["Normal"]))
+            elements.append(Spacer(1, 0.3*cm))
+            tabla_header = ["Comida", "Cantidad", "Unidad/Equiv", "Peso neto (g)", "Kcal", "Prot", "Lip", "HC", "Fibra", "Colesterol", "Vit A", "Vit C", "Ca", "Fe", "Na", "AG sat", "AG mono", "AG poli", "Azucar", "IG", "CG"]
+            tabla_datos = [tabla_header]
+            for clave, etiqueta in [("desayuno", "Desayuno"), ("media_manana", "Media manana"), ("comida", "Comida/Almuerzo"), ("merienda", "Merienda"), ("cena", "Cena"), ("otros", "Refrigerio/Otros")]:
+                tabla_datos.append([etiqueta, "-", "-", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "-", "-"])
+            tabla_datos.append(["TOTALES DEL DIA", "-", "-", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "-", "-"])
+            tabla_smae = Table(tabla_datos, colWidths=[2*cm, 1.6*cm, 2*cm, 1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.2*cm, 1.2*cm])
+            tabla_smae.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.5, colors.grey), ("BACKGROUND", (0,0), (0,0), colors.lightblue), ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"), ("ALIGN", (0,0), (-1,-1), "CENTER"), ("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("FONTSIZE", (0,0), (-1,-1), 6), ("BACKGROUND", (-1,-1), (-1,-1), colors.lightgrey), ("FONTNAME", (-1,-1), (-1,-1), "Helvetica-Bold")]))
+            elements.append(tabla_smae)
+            elements.append(Spacer(1, 0.5*cm))
+            elements.append(Paragraph("<i>Nota: registro para documentacion.</i>", styles["Normal"]))
+            doc.build(elements)
+            if os.name == "nt" and hasattr(os, "startfile"):
+                os.startfile(ruta)
+            self.status.config(text=f"Recuento alimentario exportado a PDF: {ruta}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    # ---------- Pesta�a 4 Evaluaci�n Bioqu�mica ----------
     def _tab_bioquimica(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="4. Evaluación Bioquímica")
