@@ -288,6 +288,17 @@ RECUENTO_TIPO_SI_NO = "si_no"
 RECUENTO_TIPO_NUMERO = "numero"
 RECUENTO_TIPO_LARGO = "largo"
 RECUENTO_INTERVALOS = ["Cada 2 h", "Cada 3 h", "Cada 4 h", "Irregular"]
+RECUENTO_CLAVE_SEMANAL = "patron_semanal"
+RECUENTO_DIAS_SEMANA = [
+    ("lunes", "Lunes"), ("martes", "Martes"), ("miercoles", "Miércoles"),
+    ("jueves", "Jueves"), ("viernes", "Viernes"), ("sabado", "Sábado"),
+    ("domingo", "Domingo"),
+]
+RECUENTO_MOMENTOS_SEMANA = [
+    ("desayuno", "Desayuno"), ("media_manana", "Media mañana"),
+    ("comida", "Comida"), ("merienda", "Merienda"), ("cena", "Cena"),
+    ("observaciones", "Observaciones"),
+]
 # (clave, etiqueta, tipo de campo). Se guardan solo las contestadas.
 RECUENTO_SECCIONES = [
     ("A. Lactante alimentado con leche materna", "materna", [
@@ -3380,31 +3391,37 @@ class App(tk.Tk):
 
         self.rec_vars = {}
         self.rec_textos = {}
+        self.rec_semanal = {}
         for titulo, seccion, preguntas in RECUENTO_SECCIONES:
             marco_s = ttk.LabelFrame(interior, text=titulo)
             marco_s.pack(fill="x", padx=8, pady=4)
             marco_s.columnconfigure(1, weight=1)
+            desplaza = 0
             for i, (clave, etiqueta, tipo) in enumerate(preguntas):
+                fila = i + desplaza
+                if clave == "n_patron":
+                    self._crear_patron_semanal(marco_s, fila + 1)
+                    desplaza += 1
                 ttk.Label(marco_s, text=etiqueta).grid(
-                    row=i, column=0, sticky="w", padx=6, pady=4)
+                    row=fila, column=0, sticky="w", padx=6, pady=4)
                 if tipo == RECUENTO_TIPO_SI_NO:
                     var = tk.StringVar()
                     ttk.Combobox(
                         marco_s, textvariable=var, state="readonly", width=10,
-                        values=RECUENTO_SI_NO).grid(row=i, column=1, sticky="w", padx=6, pady=4)
+                        values=RECUENTO_SI_NO).grid(row=fila, column=1, sticky="w", padx=6, pady=4)
                 elif tipo == RECUENTO_TIPO_NUMERO:
                     var = tk.StringVar()
                     ttk.Entry(marco_s, textvariable=var, width=10).grid(
-                        row=i, column=1, sticky="w", padx=6, pady=4)
+                        row=fila, column=1, sticky="w", padx=6, pady=4)
                 elif tipo == RECUENTO_TIPO_LARGO:
                     var = tk.StringVar()
                     box = tk.Text(marco_s, height=5, width=40, wrap="word")
-                    box.grid(row=i, column=1, sticky="ew", padx=6, pady=4)
+                    box.grid(row=fila, column=1, sticky="ew", padx=6, pady=4)
                     self.rec_textos[clave] = box
                 else:
                     var = tk.StringVar()
                     ttk.Entry(marco_s, textvariable=var, width=40).grid(
-                        row=i, column=1, sticky="ew", padx=6, pady=4)
+                        row=fila, column=1, sticky="ew", padx=6, pady=4)
                 self.rec_vars[clave] = var
                 if clave == "f_intervalo":
                     var.trace_add("write", self._completar_intervalo_recuento)
@@ -3425,6 +3442,73 @@ class App(tk.Tk):
 
         self._rec_grupos_visibles = None
         self._actualizar_recuento_secciones()
+
+    def _crear_patron_semanal(self, padre, fila):
+        """Tabla de comidas por día de la semana para el niño mayor."""
+        marco = ttk.LabelFrame(padre, text="Patrón de comidas por día de la semana")
+        marco.grid(row=fila, column=0, columnspan=2, sticky="ew", padx=6, pady=6)
+        for col in range(1, len(RECUENTO_MOMENTOS_SEMANA) + 1):
+            marco.columnconfigure(col, weight=1)
+        for col, (_clave, etiqueta) in enumerate(RECUENTO_MOMENTOS_SEMANA):
+            ttk.Label(marco, text=etiqueta, font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=col + 1, sticky="w", padx=4, pady=2)
+        for i, (dia, etiqueta_dia) in enumerate(RECUENTO_DIAS_SEMANA):
+            ttk.Label(marco, text=etiqueta_dia, width=11, anchor="w").grid(
+                row=i + 1, column=0, sticky="nw", padx=4, pady=2)
+            for col, (momento, _etiqueta) in enumerate(RECUENTO_MOMENTOS_SEMANA):
+                clave = f"{dia}_{momento}"
+                box = tk.Text(
+                    marco, height=2, wrap="word",
+                    width=(24 if momento == "observaciones" else 16))
+                box.grid(row=i + 1, column=col + 1, sticky="ew", padx=2, pady=1)
+                self.rec_semanal[clave] = box
+
+    def _patron_semanal_recuento(self):
+        """Comidas declaradas por día de la semana, sin celdas vacías."""
+        semana = {}
+        for dia, _etiqueta in RECUENTO_DIAS_SEMANA:
+            momentos = {}
+            for momento, _m in RECUENTO_MOMENTOS_SEMANA:
+                valor = self.rec_semanal[f"{dia}_{momento}"].get("1.0", "end").strip()
+                if valor:
+                    momentos[momento] = valor
+            if momentos:
+                semana[dia] = momentos
+        return semana
+
+    def _cargar_patron_semanal(self, semana):
+        """Rellena la tabla semanal con lo guardado en respuestas_json."""
+        valores = {}
+        if isinstance(semana, dict):
+            for dia, momentos in semana.items():
+                if not isinstance(momentos, dict):
+                    continue
+                for momento, valor in momentos.items():
+                    if f"{dia}_{momento}" in self.rec_semanal and isinstance(valor, str):
+                        valores[f"{dia}_{momento}"] = valor
+        for clave, box in self.rec_semanal.items():
+            estado = box.cget("state")
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            if clave in valores:
+                box.insert("1.0", valores[clave])
+            box.configure(state=estado)
+
+    def _lineas_patron_semanal(self):
+        """Patrón semanal en texto para el resumen de la entrevista."""
+        lineas = []
+        for dia, etiqueta_dia in RECUENTO_DIAS_SEMANA:
+            momentos = [
+                (etiqueta, self.rec_semanal[f"{dia}_{clave}"].get("1.0", "end").strip())
+                for clave, etiqueta in RECUENTO_MOMENTOS_SEMANA
+            ]
+            contestados = [(e, v) for e, v in momentos if v]
+            if not contestados:
+                continue
+            lineas.append(f"    – {etiqueta_dia}")
+            for etiqueta, valor in contestados:
+                lineas.append(f"        · {etiqueta}: {valor}")
+        return lineas
 
     def _completar_intervalo_recuento(self, *_args):
         """Sugiere el intervalo («cada 2 h»…) a partir del número de tomas."""
@@ -3483,6 +3567,11 @@ class App(tk.Tk):
                             var.set("")
                     else:
                         var.set("")
+            if seccion == "mayor":
+                for box in self.rec_semanal.values():
+                    box.configure(state="normal" if activa else "disabled")
+                    if not activa:
+                        box.delete("1.0", "end")
 
     def _respuestas_recuento(self):
         """Respuestas contestadas de las secciones visibles, por clave."""
@@ -3498,6 +3587,10 @@ class App(tk.Tk):
                     valor = self.rec_vars[clave].get().strip()
                 if valor:
                     datos[clave] = valor
+        if "mayor" in self._rec_grupos_visibles:
+            semana = self._patron_semanal_recuento()
+            if semana:
+                datos[RECUENTO_CLAVE_SEMANAL] = semana
         return datos
 
     def _escribir_recuento(self, texto):
@@ -3507,8 +3600,9 @@ class App(tk.Tk):
         self.rec_texto.configure(state="disabled")
 
     def _resumen_recuento(self):
-        self._respuestas_recuento()
+        datos = self._respuestas_recuento()
         visibles = self._rec_grupos_visibles
+        semana = datos.get(RECUENTO_CLAVE_SEMANAL, {})
         lineas = [
             f"Fecha de entrevista: {self.rec_fecha.get().strip()}",
             f"Grupo: {self.rec_grupo.get()}",
@@ -3522,25 +3616,33 @@ class App(tk.Tk):
                 if (self.rec_textos[p[0]].get("1.0", "end").strip()
                     if p[0] in self.rec_textos else self.rec_vars[p[0]].get().strip())
             ]
-            if not contestadas:
+            if not contestadas and not (seccion == "mayor" and semana):
                 continue
             lineas.append("")
             lineas.append(titulo)
+            emitida = False
             for clave, etiqueta, _tipo in contestadas:
                 valor = (self.rec_textos[clave].get("1.0", "end").strip()
                          if clave in self.rec_textos else self.rec_vars[clave].get().strip())
                 lineas.append(f"  · {etiqueta} {valor}")
+                if clave == "n_patron" and semana:
+                    lineas.extend(self._lineas_patron_semanal())
+                    emitida = True
+            if seccion == "mayor" and semana and not emitida:
+                lineas.extend(self._lineas_patron_semanal())
         total = sum(
             1 for _t, s, qs in RECUENTO_SECCIONES if s in visibles for _c, _e, _ti in qs
             if (self.rec_textos[_c].get("1.0", "end").strip()
                 if _c in self.rec_textos else self.rec_vars[_c].get().strip())
         )
         lineas.append("")
-        lineas.append(f"Preguntas contestadas: {total}")
+        lineas.append(f"Preguntas contestadas: {total} · Días descritos: {len(semana)}")
         lineas.append("")
         lineas.append(RECUENTO_NOTA)
         self._escribir_recuento("\n".join(lineas))
-        self.status.config(text=f"Resumen del recuento alimentario | {total} respuestas")
+        self.status.config(
+            text=f"Resumen del recuento alimentario | {total} respuestas | "
+                 f"{len(semana)} días descritos")
 
     def _limpiar_recuento(self):
         self.rec_grupo.set(RECUENTO_GRUPO_LACTANTE)
@@ -3549,6 +3651,9 @@ class App(tk.Tk):
         for clave, var in self.rec_vars.items():
             var.set("")
         for box in self.rec_textos.values():
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+        for box in self.rec_semanal.values():
             box.configure(state="normal")
             box.delete("1.0", "end")
         self.rec_observaciones.delete("1.0", "end")
@@ -3628,7 +3733,9 @@ class App(tk.Tk):
         except ValueError:
             datos = {}
         for clave, valor in datos.items():
-            if clave in self.rec_textos:
+            if clave == RECUENTO_CLAVE_SEMANAL:
+                self._cargar_patron_semanal(valor)
+            elif clave in self.rec_textos:
                 box = self.rec_textos[clave]
                 box.configure(state="normal")
                 box.delete("1.0", "end")
