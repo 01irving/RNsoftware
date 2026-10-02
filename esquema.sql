@@ -269,6 +269,25 @@ CREATE TABLE IF NOT EXISTS evaluacion_desarrollo_motor (
 );
 CREATE INDEX IF NOT EXISTS idx_desarrollo_motor_paciente ON evaluacion_desarrollo_motor(paciente_id);
 
+CREATE TABLE IF NOT EXISTS alimentos_smae (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    grupo TEXT,
+    subgrupo TEXT,
+    alimento TEXT NOT NULL,
+    cantidad_sugerida TEXT,
+    unidad TEXT,
+    peso_bruto_g REAL,
+    peso_neto_g REAL,
+    kcal REAL,
+    proteinas_g REAL,
+    lipidos_g REAL,
+    hidratos_carbono_g REAL,
+    fibra_g REAL,
+    codigo TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alimentos_smae_grupo ON alimentos_smae(grupo);
+CREATE INDEX IF NOT EXISTS idx_alimentos_smae_alimento ON alimentos_smae(alimento);
+
 CREATE TABLE IF NOT EXISTS recuento_alimentario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
@@ -276,6 +295,8 @@ CREATE TABLE IF NOT EXISTS recuento_alimentario (
     grupo TEXT,
     tipo_alimentacion TEXT,
     respuestas_json TEXT,
+    patron_semanal_json TEXT,
+    ingesta_json TEXT,
     observaciones TEXT,
     fecha_registro TEXT DEFAULT (datetime('now','localtime'))
 );
