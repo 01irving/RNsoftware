@@ -2522,12 +2522,12 @@ class App(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
+        self._tab_recuento()
         self._tab_antecedentes()
         self._tab_cans()
         self._tab_farmaco()
         self._tab_bioquimica()
         self._tab_ecuaciones()
-        self._tab_recuento()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -3325,7 +3325,7 @@ class App(tk.Tk):
     # ---------- Pestaña 6 Recuento Alimentario ----------
     def _tab_recuento(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="6. Recuento Alimentario")
+        self.notebook.add(tab, text="2. Recuento Alimentario")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
