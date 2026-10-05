@@ -600,6 +600,161 @@ def obtener_alimento_smae5(nombre):
         conn.close()
 
 
+ANT_NN_SINO = ["Sí", "No", "No aplica"]
+ANT_NN_ESCOLARIDAD = ["Sin escolaridad", "Primaria", "Secundaria",
+                      "Preparatoria/técnico", "Universidad"]
+ANT_NN_CASA = ["Madera", "Concreto", "Intemperie (adobe/trapo)", "Otro"]
+ANT_NN_PISO = ["Madera", "Cemento", "Tierra", "Otro"]
+
+# Historia clínica del recién nacido (formulario 208C0101100000L-013-19).
+# La ficha de identificación (jurisdicción, expediente, unidad, fecha, nombre,
+# sexo, madre, edad, dirección, teléfono, fecha y lugar de nacimiento) NO se
+# incluye: esos datos ya se capturan en la pestaña Paciente.
+# Cada campo: (clave, etiqueta, tipo, opciones, ancho)
+#   t = texto | n = numérico | s = Sí/No | c = lista | m = multiopción | L = texto largo
+ANT_NN_TABLA = [
+    ("heredofamiliares", "Antecedentes heredofamiliares", [
+        ("hf_patologias", "Patologías en la familia", "m",
+         ["Diabetes", "Hipertensión", "Cardiovasculares", "Renales",
+          "Hepáticos", "Neoplasias", "Tuberculosis"], 0),
+        ("hf_especifique", "Especifique", "t", [], 60),
+        ("hf_otros", "Otros", "L", 3, 0),
+    ]),
+    ("pregestacionales", "Antecedentes pregestacionales", [
+        ("pg_gestas", "Gestas", "n", [], 12),
+        ("pg_hijos_vivos", "Hijos vivos", "n", [], 12),
+        ("pg_partos", "Partos", "n", [], 12),
+        ("pg_cesareas", "Cesáreas", "n", [], 12),
+        ("pg_abortos", "Abortos", "n", [], 12),
+        ("pg_obito", "Óbito", "n", [], 12),
+        ("pg_mola", "Mola", "n", [], 12),
+        ("pg_ectopico", "Ectópico", "s", ANT_NN_SINO, 14),
+        ("pg_escolaridad_padre", "Escolaridad del padre", "c", ANT_NN_ESCOLARIDAD, 24),
+        ("pg_escolaridad_madre", "Escolaridad de la madre", "c", ANT_NN_ESCOLARIDAD, 24),
+        ("pg_socioeconomica", "Condición socioeconómica", "c",
+         ["Buena", "Regular", "Mala"], 16),
+        ("pg_casa", "Material de la casa", "m", ANT_NN_CASA, 0),
+        ("pg_piso", "Material del piso", "m", ANT_NN_PISO, 0),
+        ("pg_habitaciones", "N.º de habitaciones", "n", [], 12),
+        ("pg_habitantes", "N.º de habitantes", "n", [], 12),
+        ("pg_ventilacion", "Ventilación", "s", ANT_NN_SINO, 14),
+        ("pg_luz_electrica", "Luz eléctrica", "s", ANT_NN_SINO, 14),
+        ("pg_agua_potable", "Agua potable", "s", ANT_NN_SINO, 14),
+        ("pg_drenaje", "Drenaje", "s", ANT_NN_SINO, 14),
+        ("pg_estado_nutricional", "Estado nutricional de la madre", "c",
+         ["Bueno", "Regular", "Malo"], 16),
+        ("pg_inmunizacion", "¿Recibió inmunización en el embarazo?", "s", ANT_NN_SINO, 14),
+    ]),
+    ("prenatales", "Antecedentes prenatales", [
+        ("pr_tabaquismo", "Tabaquismo", "s", ANT_NN_SINO, 14),
+        ("pr_tabaquismo_evol", "Evolución del tabaquismo", "t", [], 45),
+        ("pr_alcoholismo", "Alcoholismo", "s", ANT_NN_SINO, 14),
+        ("pr_alcoholismo_evol", "Evolución del alcoholismo", "t", [], 45),
+        ("pr_toxicomanias", "Toxicomanías", "s", ANT_NN_SINO, 14),
+        ("pr_toxicomanias_evol", "Evolución de las toxicomanías", "t", [], 45),
+        ("pr_grupo_rh_madre", "Grupo y Rh de la madre", "t", [], 20),
+        ("pr_grupo_rh_padre", "Grupo y Rh del padre", "t", [], 20),
+        ("pr_controles", "N.º de controles prenatales", "n", [], 14),
+        ("pr_semana_inicio", "Controles a partir de la semana", "n", [], 14),
+        ("pr_alteraciones", "Alteraciones detectadas durante el embarazo", "m",
+         ["Oligohidramnios", "Polihidramnios", "Retraso del crecimiento intrauterino"], 0),
+        ("pr_patologias", "Patologías durante el embarazo", "m",
+         ["Rubéola", "Toxoplasmosis", "Citomegalovirus", "Preeclampsia", "Eclampsia",
+          "Diabetes gestacional", "Diabetes mellitus", "Otra"], 0),
+        ("pr_patologias_otras", "Otra patología (especifique)", "t", [], 45),
+        ("pr_farmacos", "Fármacos durante el embarazo", "L", 3, 0),
+    ]),
+    ("intranatales", "Antecedentes intranatales", [
+        ("in_parto", "Antecedentes del parto", "m",
+         ["Eutócico", "Distócico", "Rotura prematura de membranas",
+          "Prolapso del cordón umbilical"], 0),
+        ("in_duracion", "Duración del parto", "t", [], 20),
+        ("in_liquido_amniotico", "Características del líquido amniótico", "L", 3, 0),
+        ("in_placenta", "Características de la placenta", "L", 3, 0),
+    ]),
+    ("postnatales", "Antecedentes postnatales", [
+        ("po_edad_gestacional", "Edad gestacional (semanas)", "t", [], 14),
+        ("po_capurro", "SDG por Capurro", "t", [], 14),
+        ("po_apgar", "APGAR", "t", [], 14),
+        ("po_silverman", "Silverman", "t", [], 14),
+        ("po_alimentacion", "Alimentación del neonato", "m",
+         ["Lactancia materna", "Fórmula"], 0),
+        ("po_alimentacion_motivo", "¿Por qué?", "t", [], 45),
+        ("po_tamiz", "Tamiz realizado", "s", ANT_NN_SINO, 14),
+        ("po_inmunizaciones", "Inmunizaciones", "t", [], 45),
+        ("po_vitamina_k", "Aplicación de vitamina K", "s", ANT_NN_SINO, 14),
+        ("po_cloranfenicol", "Cloranfenicol oftálmico", "s", ANT_NN_SINO, 14),
+        ("po_vitamina_a", "Aplicación de vitamina A", "s", ANT_NN_SINO, 14),
+        ("po_neonatales", "Antecedentes neonatales", "m",
+         ["Apneas", "Síndrome de dificultad respiratoria", "Hemorragia",
+          "Convulsiones", "Hipoglucemia"], 0),
+    ]),
+    ("exploracion_fisica", "Exploración física", [
+        ("ef_fc", "Frecuencia cardíaca (lpm)", "t", [], 14),
+        ("ef_fr", "Frecuencia respiratoria (rpm)", "t", [], 14),
+        ("ef_temp", "Temperatura (°C)", "t", [], 14),
+        ("ef_peso", "Peso (g)", "t", [], 14),
+        ("ef_talla", "Talla (cm)", "t", [], 14),
+        ("ef_pc", "Perímetro cefálico (cm)", "t", [], 14),
+        ("ef_pt", "Perímetro torácico (cm)", "t", [], 14),
+        ("ef_pa", "Presión arterial (mmHg)", "t", [], 16),
+        ("ef_pie", "Pie completo", "s", ANT_NN_SINO, 14),
+    ]),
+    ("exploracion_regional", "Exploración regional", [
+        ("er_color_piel", "Color de piel", "t", [], 30),
+        ("er_fascies", "Fascies", "t", [], 30),
+        ("er_movimientos", "Movimientos anormales", "t", [], 30),
+        ("er_piel", "Lesiones dérmicas", "t", [], 30),
+        ("er_postura", "Postura", "t", [], 30),
+        ("er_respiracion", "Tipo de respiración", "t", [], 30),
+        ("er_abdominal", "Signos abdominales", "t", [], 30),
+        ("er_cabeza", "Cabeza", "m",
+         ["Sin alteración", "Cefalohematoma", "Caput succedaneum"], 0),
+        ("er_cabeza_texto", "Detalle de cabeza / tono de fontanelas", "t", [], 45),
+        ("er_ojos", "Ojos", "m", ["Sin alteraciones", "Conjuntivitis"], 0),
+        ("er_oidos", "Oídos", "m",
+         ["Sin alteraciones", "Implantación adecuada", "Implantación baja"], 0),
+        ("er_nariz", "Nariz", "m",
+         ["Sin alteración", "Permeable", "Secreciones", "Aleteo nasal"], 0),
+        ("er_boca", "Boca", "m",
+         ["Sin alteración", "Labio leporino", "Paladar hendido"], 0),
+        ("er_dientes", "Dientes", "t", [], 30),
+        ("er_lengua", "Lengua", "m", ["Sin alteración", "Micrognatia", "Otra"], 0),
+        ("er_lengua_otra", "Otra alteración de la lengua", "t", [], 45),
+        ("er_cuello", "Cuello", "m", ["Sin alteraciones", "Otro"], 0),
+        ("er_cuello_otro", "Otro hallazgo en el cuello", "t", [], 45),
+        ("er_torax", "Tórax", "m",
+         ["Sin alteraciones", "Hipertrofia de mamas", "Secreción láctea",
+          "Pezones supernumerarios", "Deformidades de parrilla costal", "Soplo"], 0),
+        ("er_abdomen", "Abdomen", "m",
+         ["Sin alteraciones", "Hernia umbilical", "Cordón umbilical"], 0),
+        ("er_abdomen_texto", "Detalle de abdomen / cordón", "t", [], 45),
+        ("er_pelvis", "Pelvis", "m",
+         ["Sin alteraciones", "Luxación congénita de cadera"], 0),
+        ("er_genitales", "Genitales", "m",
+         ["Sin alteraciones", "Hipertrofia de clítoris", "Crecimiento peneano",
+          "Hipospadias", "Hidrocele", "Criptorquidia"], 0),
+        ("er_genitales_otro", "Otro hallazgo genital / permeabilidad anal", "t", [], 45),
+        ("er_extremidades", "Extremidades", "m",
+         ["Sin alteraciones", "Tono muscular alterado", "Movilidad alterada",
+          "Tamaño alterado", "Polidactilia", "Sindactilia", "Fractura", "Pie equino varo"], 0),
+        ("er_barlow_ortolani", "Maniobra de Barlow y Ortolani", "s", ANT_NN_SINO, 14),
+    ]),
+    ("reflejos", "Reflejos", [
+        ("rf_busqueda", "Búsqueda", "s", ANT_NN_SINO, 14),
+        ("rf_deglucion", "Deglución", "s", ANT_NN_SINO, 14),
+        ("rf_succion", "Succión", "s", ANT_NN_SINO, 14),
+        ("rf_moro", "Moro", "s", ANT_NN_SINO, 14),
+        ("rf_marcha", "Marcha", "s", ANT_NN_SINO, 14),
+        ("rf_babinski", "Babinski", "s", ANT_NN_SINO, 14),
+    ]),
+    ("apego", "Apego", [
+        ("ap_apego", "Apego", "s", ANT_NN_SINO, 14),
+        ("ap_observaciones", "Observaciones del apego", "L", 3, 0),
+    ]),
+]
+
+
 CSV_DEFAULT = {
     "ninos.csv": """Edad_gestacional_semanas,Percentil_10_peso_g,Percentil_50_peso_g,Percentil_90_peso_g
 28,815,1147,1470
@@ -2774,6 +2929,7 @@ class App(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
+        self._tab_antecedentes_neonatal()
         self._tab_recuento()
         self._tab_recuento24h()
         self._tab_antecedentes()
@@ -2882,10 +3038,10 @@ class App(tk.Tk):
         self.campos["dx_medico"] = tk.StringVar()
         ttk.Entry(marco_dx, textvariable=self.campos["dx_medico"]).pack(fill="x", padx=8, pady=8)
 
-    # ---------- Pestaña 1 Antropometría ----------
+    # ---------- Pestaña 4 Antropometría ----------
     def _tab_antecedentes(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="1. Antropometría")
+        self.notebook.add(tab, text="4. Antropometría")
         self._tab_ant = tab
 
         contenedor = ttk.Frame(tab)
@@ -3151,10 +3307,10 @@ class App(tk.Tk):
         self.campos["fecha_actual"].trace_add("write", self._actualizar_unidad_edad_velocidad)
         self._actualizar_unidad_edad_velocidad()
 
-    # ---------- Pestaña 3 Interacción Fármaco-Nutriente ----------
+    # ---------- Pestaña 6 Interacción Fármaco-Nutriente ----------
     def _tab_farmaco(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="3. Interacción Fármaco-Nutriente")
+        self.notebook.add(tab, text="6. Interacción Fármaco-Nutriente")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -3384,10 +3540,10 @@ class App(tk.Tk):
         self.farmaco_interior.update_idletasks()
         self.farmaco_canvas.configure(scrollregion=self.farmaco_canvas.bbox("all"))
 
-    # ---------- Pestaña 5 Ecuaciones Predictivas ----------
+    # ---------- Pestaña 8 Ecuaciones Predictivas ----------
     def _tab_ecuaciones(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="5. Ecuaciones Predictivas")
+        self.notebook.add(tab, text="8. Ecuaciones Predictivas")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -3575,7 +3731,7 @@ class App(tk.Tk):
         self.status.config(
             text=f"Editando estimación energética | Paciente N° {self._paciente_id}")
 
-    # ---------- Pestaña 6 Recuento Alimentario ----------
+    # ---------- Pestaña 2 Recuento Alimentario ----------
     def _tab_recuento(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="2. Recuento Alimentario")
@@ -4076,7 +4232,7 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # ---------- Pestaña 3 bis: Recuento 24 horas ----------
+    # ---------- Pestaña 3 Recuento 24 horas ----------
     def _tab_recuento24h(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="3. Recuento 24 horas")
@@ -4717,7 +4873,7 @@ class App(tk.Tk):
     # ---------- Pesta�a 4 Evaluaci�n Bioqu�mica ----------
     def _tab_bioquimica(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="4. Evaluación Bioquímica")
+        self.notebook.add(tab, text="7. Evaluación Bioquímica")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -4884,10 +5040,10 @@ class App(tk.Tk):
             self._actualizar_ref_label(p)
             self._comparar_bioquimica(p)
 
-    # ---------- Pestaña 2 Signos Clínicos (CANS score) ----------
+    # ---------- Pestaña 5 Signos Clínicos (CANS score) ----------
     def _tab_cans(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="2. Signos Clínicos (CANS)")
+        self.notebook.add(tab, text="5. Signos Clínicos (CANS)")
         self._tab_signos = tab
 
         barra = ttk.Frame(tab)
@@ -4981,7 +5137,7 @@ class App(tk.Tk):
         ttk.Label(
             marco_ip,
             text="IP = peso al nacer (g) × 100 / longitud al nacer (cm)³  ·  "
-                 "toma los datos de '1. Antropometría' → Antecedentes Prenatales",
+                 "toma los datos de '4. Antropometría' → Antecedentes Prenatales",
             foreground="#555555",
         ).pack(anchor="w", padx=8, pady=(0, 6))
         self.ip_patron_label = tk.Label(
@@ -5884,7 +6040,7 @@ class App(tk.Tk):
         if semanas is None or not codigo_eg or ip is None:
             self.ip_patron_label.config(
                 text="Patrón de crecimiento (Tabla 5 Caiza 2003): requiere la clasificación "
-                     "del peso por EG (pestaña '1. Antropometría') y el índice ponderal.",
+                     "del peso por EG (pestaña '4. Antropometría') y el índice ponderal.",
                 foreground="#8B4513")
             return
         referencia = IP_REFERENCIA_EG.get(semanas)
@@ -6858,6 +7014,219 @@ class App(tk.Tk):
         if not silencioso:
             self._ver_evaluaciones()
 
+    def _crear_seccion_antecedentes_neonatal(self, contenedor, titulo, campos):
+        """Construye una sección de la pestaña Antecedentes según el formulario."""
+        marco = ttk.LabelFrame(contenedor, text=titulo)
+        marco.pack(fill="x", padx=10, pady=6)
+        marco.columnconfigure(1, weight=1)
+        fila = 0
+        for clave, etiqueta, tipo, opciones, ancho in campos:
+            if tipo == "m":
+                marco_op = ttk.LabelFrame(marco, text=etiqueta)
+                marco_op.grid(row=fila, column=0, columnspan=2, sticky="ew",
+                              padx=8, pady=4)
+                marco_op.columnconfigure(0, weight=1)
+                variables = {}
+                for indice, opcion in enumerate(opciones):
+                    var = tk.BooleanVar(value=False)
+                    ttk.Checkbutton(marco_op, text=opcion, variable=var).grid(
+                        row=indice // 3, column=indice % 3, sticky="w",
+                        padx=6, pady=2)
+                    variables[opcion] = var
+                self.ante_nn_multi[clave] = variables
+                fila += 1
+                continue
+            ttk.Label(marco, text=etiqueta, wraplength=250,
+                      justify="left").grid(row=fila, column=0, sticky="w",
+                                           padx=8, pady=3)
+            if tipo == "s":
+                var = tk.StringVar()
+                widget = ttk.Combobox(marco, textvariable=var, state="readonly",
+                                      width=ancho, values=opciones)
+            elif tipo == "c":
+                var = tk.StringVar()
+                widget = ttk.Combobox(marco, textvariable=var, width=ancho,
+                                      values=opciones)
+            elif tipo == "L":
+                widget = tk.Text(marco, height=opciones, wrap="word")
+                widget.grid(row=fila, column=1, sticky="ew", padx=8, pady=3)
+                self.ante_nn_textos[clave] = widget
+                fila += 1
+                continue
+            elif tipo == "n":
+                var = tk.StringVar()
+                widget = ttk.Entry(marco, textvariable=var, width=ancho,
+                                   justify="right")
+            else:
+                var = tk.StringVar()
+                widget = ttk.Entry(marco, textvariable=var, width=ancho)
+            widget.grid(row=fila, column=1, sticky="ew", padx=8, pady=3)
+            self.ante_nn[clave] = var
+            fila += 1
+        return marco
+
+    def _tab_antecedentes_neonatal(self):
+        """Pestaña Antecedentes: historia clínica del recién nacido.
+
+        Omite la ficha de identificación porque esos datos ya están en Paciente.
+        """
+        marco = ttk.Frame(self.notebook)
+        self.notebook.add(marco, text="1. Antecedentes")
+        self._tab_ant_nn = marco
+        self.ante_nn = {}
+        self.ante_nn_textos = {}
+        self.ante_nn_multi = {}
+
+        barra = ttk.Frame(marco)
+        barra.pack(fill="x", padx=10, pady=(8, 0))
+        ttk.Label(barra, text="Antecedentes del recién nacido",
+                  font=("Segoe UI", 10, "bold")).pack(side="left")
+        ttk.Label(barra, text="(los datos de identificación están en la pestaña Paciente)").pack(
+            side="left", padx=6)
+        ttk.Button(barra, text="Guardar antecedentes",
+                   command=self._guardar_antecedentes_neonatal).pack(side="right")
+        ttk.Button(barra, text="Editar",
+                   command=self._editar_antecedentes_neonatal).pack(side="right", padx=6)
+        ttk.Button(barra, text="Limpiar",
+                   command=self._limpiar_antecedentes_neonatal).pack(side="right")
+
+        contenedor = ttk.Frame(marco)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        interior.bind("<Configure>",
+                      lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(ventana, width=e.width))
+
+        def _rueda(evento):
+            canvas.yview_scroll(-1 if evento.delta > 0 else 1, "units")
+
+        canvas.bind("<MouseWheel>", _rueda)
+        interior.bind("<MouseWheel>", _rueda)
+
+        for _clave, titulo, campos in ANT_NN_TABLA:
+            self._crear_seccion_antecedentes_neonatal(interior, titulo, campos)
+
+    def _datos_antecedentes_neonatal(self):
+        """Serializa los campos capturados en la pestaña Antecedentes."""
+        datos = {}
+        for clave, var in self.ante_nn.items():
+            valor = var.get().strip()
+            if valor:
+                datos[clave] = valor
+        for clave, widget in self.ante_nn_textos.items():
+            valor = widget.get("1.0", "end").strip()
+            if valor:
+                datos[clave] = valor
+        for clave, variables in self.ante_nn_multi.items():
+            marcadas = [opcion for opcion, var in variables.items() if var.get()]
+            if marcadas:
+                datos[clave] = marcadas
+        return datos
+
+    def _fijar_datos_antecedentes_neonatal(self, datos):
+        for clave, var in self.ante_nn.items():
+            var.set(str(datos.get(clave, "") or ""))
+        for clave, widget in self.ante_nn_textos.items():
+            widget.delete("1.0", "end")
+            valor = datos.get(clave) or ""
+            if valor:
+                widget.insert("1.0", valor)
+        for clave, variables in self.ante_nn_multi.items():
+            marcados = datos.get(clave) or []
+            if isinstance(marcados, str):
+                marcados = [m.strip() for m in marcados.split("|") if m.strip()]
+            marcados = list(marcados)
+            for opcion, var in variables.items():
+                var.set(opcion in marcados)
+
+    def _limpiar_antecedentes_neonatal(self, avisar=True):
+        self._fijar_datos_antecedentes_neonatal({})
+        if avisar:
+            self.status.config(text="Campos de antecedentes limpiados")
+
+    def _crear_tabla_antecedentes_neonatal(self, cur):
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS antecedentes_neonatal (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')),
+                   datos_json TEXT)""")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_antecedentes_nn_paciente "
+            "ON antecedentes_neonatal(paciente_id)")
+
+    def _guardar_antecedentes_neonatal(self):
+        if not self._exigir_paciente():
+            return
+        datos = self._datos_antecedentes_neonatal()
+        if not datos:
+            messagebox.showwarning(
+                "Guardar", "No ha capturado ningún dato de antecedentes")
+            return
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            self._crear_tabla_antecedentes_neonatal(cur)
+            existente = cur.execute(
+                "SELECT id FROM antecedentes_neonatal WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1", (self._paciente_id,)).fetchone()
+            texto = json.dumps(datos, ensure_ascii=False)
+            if existente:
+                cur.execute(
+                    """UPDATE antecedentes_neonatal
+                       SET datos_json = ?, fecha_registro = datetime('now','localtime')
+                       WHERE id = ?""", (texto, existente[0]))
+            else:
+                cur.execute(
+                    """INSERT INTO antecedentes_neonatal (paciente_id, datos_json)
+                       VALUES (?,?)""", (self._paciente_id, texto))
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Antecedentes guardados | Paciente N° {self._paciente_id}")
+            self._cargar_ultimos_datos()
+            messagebox.showinfo("Guardado", "Antecedentes guardados")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_antecedentes_neonatal(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                "SELECT datos_json FROM antecedentes_neonatal "
+                "WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            fila = None
+        conn.close()
+        if fila is None:
+            self._limpiar_antecedentes_neonatal(avisar=False)
+            if not silencioso:
+                messagebox.showinfo(
+                    "Editar", "No hay antecedentes guardados para este paciente")
+            return
+        try:
+            datos = json.loads(fila[0] or "{}")
+        except (TypeError, ValueError):
+            datos = {}
+        self._fijar_datos_antecedentes_neonatal(datos)
+        self.status.config(
+            text=f"Editando antecedentes | Paciente N° {self._paciente_id}")
+        if not silencioso:
+            messagebox.showinfo(
+                "Editar", "Antecedentes cargados para este paciente")
+
     def _ver_evaluaciones(self):
         """Selecciona la pestaña de Antecedentes y desplaza a las evaluaciones OMS."""
         self.notebook.select(self._tab_ant)
@@ -7056,12 +7425,13 @@ class App(tk.Tk):
 
     def _cargar_ultimos_datos(self):
         self._editar_antecedentes(silencioso=True)
+        self._editar_antecedentes_neonatal(silencioso=True)
         self._editar_cans(silencioso=True)
         self._editar_farmaco(silencioso=True)
         self._editar_bioquimica(silencioso=True)
         self._editar_recuento(silencioso=True)
         self.status.config(
-            text=f"Datos de antecedentes, signos clínicos, fármacos y bioquímica cargados | Paciente N° {self._paciente_id}"
+            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos) | Paciente N° {self._paciente_id}"
         )
 
 if __name__ == "__main__":
