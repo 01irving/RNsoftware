@@ -350,14 +350,254 @@ RECUENTO_NOTA = (
 # SMAE-5: registro por tiempos de comida
 RECUENTO_COMIDAS = [
     ("desayuno", "Desayuno"),
-    ("media_manana", "Media mañana"),
-    ("comida", "Comida/Almuerzo"),
-    ("merienda", "Merienda"),
+    ("colacion_matutina", "Colación matutina"),
+    ("comida", "Comida"),
+    ("colacion_vespertina", "Colación vespertina"),
     ("cena", "Cena"),
-    ("otros", "Refrigerio/Otros"),
+    ("otros", "Otros / refrigerio"),
 ]
 RECUENTO_COMIDAS_CLAVES = [c[0] for c in RECUENTO_COMIDAS]
 RECUENTO_COMIDAS_ETIQUETAS = {c[0]: c[1] for c in RECUENTO_COMIDAS}
+RECUENTO_COMIDAS_VALORES = [c[1] for c in RECUENTO_COMIDAS]
+# Etiquetas de versiones anteriores, para no perder recuentos ya guardados.
+RECUENTO_COMIDAS_LEGACY = {
+    "Media manana": "Colación matutina",
+    "Media mañana": "Colación matutina",
+    "Merienda": "Colación vespertina",
+    "Comida/Almuerzo": "Comida",
+    "Comida/Almuerzo ": "Comida",
+    "Refrigerio/Otros": "Otros / refrigerio",
+    "Refrigerio": "Otros / refrigerio",
+    "Desayuno ": "Desayuno",
+}
+
+# Catálogo SMAE-5 (data/SMAE-5.xlsx). Cada fila trae el equivalente de referencia
+# (cantidad sugerida + unidad) con su peso neto y nutrientes ya calculados.
+SMAE5_XLSX = Path(__file__).resolve().parent / "data" / "SMAE-5.xlsx"
+SMAE5_MARCA = "SMAE-5 importado desde data/SMAE-5.xlsx"
+SMAE5_COLUMNAS_EXTRA = {
+    "colesterol_mg": "REAL",
+    "azucar_por_equivalente_g": "REAL",
+    "vitamina_a": "REAL",
+    "vitamina_c": "REAL",
+    "calcio": "REAL",
+    "hierro": "REAL",
+    "sodio": "REAL",
+    "indice_glicemico": "REAL",
+    "carga_glicemica": "REAL",
+}
+
+
+def _smae5_normaliza(texto):
+    """Minúsculas sin acentos ni signos, para comparar encabezados."""
+    if texto is None:
+        return ""
+    valor = str(texto).strip().lower()
+    for primo, base in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"),
+                        ("ú", "u"), ("ü", "u"), ("ñ", "n")):
+        valor = valor.replace(primo, base)
+    return "".join(c for c in valor if c.isalnum() or c in " .")
+
+
+def _smae5_numero(valor):
+    """Convierte un dato del XLSX a float; 'ND', '-' o vacío se vuelven 0.0."""
+    if valor is None:
+        return 0.0
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    texto = str(valor).strip().replace(",", ".")
+    if not texto or texto.upper() in {"ND", "N/D", "NA", "-", "--", "N.A."}:
+        return 0.0
+    digitos = "".join(c for c in texto if c.isdigit() or c in ".-")
+    try:
+        return float(digitos)
+    except ValueError:
+        return 0.0
+
+
+def _smae5_mapea_encabezados(encabezados):
+    """Detecta las columnas del Sheet aunque cambien mayúsculas, acentos u orden."""
+    mapa = {}
+    for i, titulo in enumerate(encabezados):
+        clave = _smae5_normaliza(titulo)
+        if not clave:
+            continue
+        destino = None
+        if clave.startswith("alimento"):
+            destino = "alimento"
+        elif "colesterol" in clave:
+            destino = "colesterol_mg"
+        elif "azucar" in clave and "equivalente" in clave:
+            destino = "azucar_por_equivalente_g"
+        elif "cantidad" in clave or ("unidad" in clave and "sugerid" in clave):
+            destino = "cantidad_sugerida"
+        elif clave == "unidad":
+            destino = "unidad"
+        elif "peso" in clave and "neto" in clave:
+            destino = "peso_neto_g"
+        elif "peso" in clave and ("bruto" in clave or "redond" in clave):
+            destino = "peso_bruto_g"
+        elif "energia" in clave or "energia" in clave or clave.startswith("ene"):
+            destino = "kcal"
+        elif "prote" in clave:
+            destino = "proteinas_g"
+        elif "lipid" in clave or "lipid" in clave:
+            destino = "lipidos_g"
+        elif "hidrato" in clave or clave.startswith("hc") or clave.startswith("hc"):
+            destino = "hidratos_carbono_g"
+        elif "fibra" in clave:
+            destino = "fibra_g"
+        elif "ascorbico" in clave or "vitamina" in clave and "c" == clave[-1:]:
+            destino = "vitamina_c"
+        elif "acidofolico" in clave or clave.startswith("acidofolico"):
+            destino = "acido_folico"
+        elif "calcio" in clave:
+            destino = "calcio"
+        elif "hierro" in clave:
+            destino = "hierro"
+        elif "sodio" in clave:
+            destino = "sodio"
+        elif "indiceglicemico" in clave:
+            destino = "indice_glicemico"
+        elif "cargaglicemica" in clave:
+            destino = "carga_glicemica"
+        elif clave.startswith("vitaminaa") or clave == "vita":
+            destino = "vitamina_a"
+        elif "agu" in clave or clave == "agua":
+            destino = None
+        if destino and destino not in mapa:
+            mapa[destino] = i
+    return mapa
+
+
+def _smae5_filas(ruta):
+    """Lee data/SMAE-5.xlsx y devuelve (grupo, registro) por alimento."""
+    from openpyxl import load_workbook
+
+    libro = load_workbook(ruta, read_only=True, data_only=True)
+    try:
+        for hoja in libro.worksheets:
+            mapa = None
+            grupo = hoja.title.strip()
+            for indice, fila in enumerate(hoja.iter_rows(max_row=6, values_only=True)):
+                tentativa = _smae5_mapea_encabezados(fila)
+                if "alimento" in tentativa:
+                    mapa = tentativa
+                    break
+            if not mapa or "alimento" not in mapa:
+                continue
+            for fila in hoja.iter_rows(min_row=indice + 2, values_only=True):
+                nombre = fila[mapa["alimento"]]
+                if nombre is None:
+                    continue
+                nombre = str(nombre).strip()
+                if not nombre or len(nombre) < 2:
+                    continue
+                registro = {"grupo": grupo, "alimento": nombre}
+                for campo, posicion in mapa.items():
+                    if campo in ("alimento",):
+                        continue
+                    try:
+                        valor = fila[posicion]
+                    except IndexError:
+                        valor = None
+                    if campo in ("cantidad_sugerida", "unidad"):
+                        registro[campo] = "" if valor is None else str(valor).strip()
+                    else:
+                        registro[campo] = _smae5_numero(valor)
+                yield grupo, registro
+    finally:
+        libro.close()
+
+
+def importar_smae5(forzar=False):
+    """Carga el catálogo SMAE-5 en la tabla alimentos_smae. Devuelve (nuevos, total)."""
+    if not SMAE5_XLSX.exists():
+        return 0, 0
+    conn = conectar()
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS smae_meta (clave TEXT PRIMARY KEY, valor TEXT)")
+        marca = conn.execute("SELECT valor FROM smae_meta WHERE clave='origen'").fetchone()
+        total = conn.execute("SELECT COUNT(*) FROM alimentos_smae").fetchone()[0]
+        if marca and marca[0] == SMAE5_MARCA and total and not forzar:
+            return 0, total
+        existentes = {
+            fila[1] for fila in conn.execute("PRAGMA table_info(alimentos_smae)")
+        }
+        for columna, tipo in SMAE5_COLUMNAS_EXTRA.items():
+            if columna not in existentes:
+                conn.execute(f"ALTER TABLE alimentos_smae ADD COLUMN {columna} {tipo}")
+        columnas = [
+            "grupo", "alimento", "cantidad_sugerida", "unidad", "peso_bruto_g", "peso_neto_g",
+            "kcal", "proteinas_g", "lipidos_g", "hidratos_carbono_g", "fibra_g",
+        ] + list(SMAE5_COLUMNAS_EXTRA)
+        marcadores = ",".join("?" for _ in columnas)
+        conn.execute(f"DELETE FROM alimentos_smae")
+        nuevos = 0
+        lote = []
+        vistos = set()
+        for grupo, registro in _smae5_filas(SMAE5_XLSX):
+            clave = _smae5_normaliza(registro["alimento"])
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            lote.append(tuple(registro.get(c) for c in columnas))
+            nuevos += 1
+            if len(lote) >= 500:
+                conn.executemany(
+                    f"INSERT INTO alimentos_smae ({','.join(columnas)}) VALUES ({marcadores})",
+                    lote)
+                lote = []
+        if lote:
+            conn.executemany(
+                f"INSERT INTO alimentos_smae ({','.join(columnas)}) VALUES ({marcadores})", lote)
+        conn.execute(
+            "INSERT OR REPLACE INTO smae_meta (clave, valor) VALUES ('origen', ?)", (SMAE5_MARCA,))
+        conn.commit()
+        return nuevos, nuevos
+    finally:
+        conn.close()
+
+
+def buscar_smae5(texto, limite=200):
+    """Autocompletado SMAE-5: coincide por inicio y, si no hay, por contenido."""
+    conn = conectar()
+    try:
+        limpio = (texto or "").strip()
+        if not limpio:
+            return []
+        filas = conn.execute(
+            "SELECT alimento, grupo, cantidad_sugerida, unidad, peso_neto_g "
+            "FROM alimentos_smae WHERE alimento LIKE ? COLLATE NOCASE "
+            "ORDER BY alimento LIMIT ?", (f"{limpio}%", limite)).fetchall()
+        if not filas:
+            filas = conn.execute(
+                "SELECT alimento, grupo, cantidad_sugerida, unidad, peso_neto_g "
+                "FROM alimentos_smae WHERE alimento LIKE ? COLLATE NOCASE "
+                "ORDER BY alimento LIMIT ?", (f"%{limpio}%", limite)).fetchall()
+        return [{"alimento": f[0], "grupo": f[1], "cantidad": f[2], "unidad": f[3],
+                 "peso_neto_g": f[4] or 0.0} for f in filas]
+    finally:
+        conn.close()
+
+
+def obtener_alimento_smae5(nombre):
+    """Registro completo del alimento (nutrientes del equivalente SMAE-5)."""
+    conn = conectar()
+    try:
+        columnas = ["grupo", "alimento", "cantidad_sugerida", "unidad", "peso_bruto_g",
+                    "peso_neto_g", "kcal", "proteinas_g", "lipidos_g",
+                    "hidratos_carbono_g", "fibra_g"] + list(SMAE5_COLUMNAS_EXTRA)
+        fila = conn.execute(
+            f"SELECT {','.join(columnas)} FROM alimentos_smae "
+            "WHERE alimento = ? COLLATE NOCASE ORDER BY id LIMIT 1", (nombre,)).fetchone()
+        if fila is None:
+            return None
+        registro = dict(zip(columnas, fila))
+        registro["nombre"] = nombre
+        return registro
+    finally:
+        conn.close()
 
 
 CSV_DEFAULT = {
@@ -2535,6 +2775,7 @@ class App(tk.Tk):
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
         self._tab_recuento()
+        self._tab_recuento24h()
         self._tab_antecedentes()
         self._tab_cans()
         self._tab_farmaco()
@@ -3832,6 +4073,644 @@ class App(tk.Tk):
             if os.name == "nt" and hasattr(os, "startfile"):
                 os.startfile(ruta)
             self.status.config(text=f"Recuento alimentario exportado a PDF: {ruta}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    # ---------- Pestaña 3 bis: Recuento 24 horas ----------
+    def _tab_recuento24h(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="3. Recuento 24 horas")
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="Recuento de 24 horas:").pack(side="left", padx=5)
+        ttk.Button(barra, text="Agregar alimento", command=self._agregar_fila24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Eliminar fila", command=self._eliminar_fila24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Calcular totales", command=self._calcular_recuento24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Guardar", command=self._guardar_recuento24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Editar", command=self._editar_recuento24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Limpiar", command=self._limpiar_recuento24h).pack(side="left", padx=3)
+        ttk.Button(barra, text="Imprimir PDF", command=self._imprimir_recuento24h_pdf).pack(side="left", padx=3)
+
+        alta = ttk.LabelFrame(tab, text="Alimento consumido (equivalente SMAE-5)")
+        alta.pack(fill="x", padx=8, pady=4)
+        self.r24_alimento_actual = None
+        self.r24_agente_actual = None
+        self.r24_coincidencias = []
+        self.r24_filas = []
+        self._r24_ultimo_alimento = None
+        self._smae_catalogo = None
+        self._smae_indice = None
+        campos = [
+            ("comida", "Tiempo de comida:", 18, "readonly"),
+            ("alimento", "Alimento (autocompletar):", 30, "normal"),
+            ("cantidad", "Cantidad de alimento:", 11, "normal"),
+            ("unidad", "Unidad:", 11, "normal"),
+            ("equiv", "N.º de equivalentes:", 9, "normal"),
+            ("peso", "P. neto (g):", 8, "normal"),
+            ("kcal", "kcal:", 7, "normal"),
+            ("prot", "Prot (g):", 7, "normal"),
+            ("lip", "Lip (g):", 7, "normal"),
+            ("hc", "HC (g):", 7, "normal"),
+            ("fibra", "Fibra (g):", 7, "normal"),
+            ("col", "Colest. (mg):", 8, "normal"),
+        ]
+        for i, (clave, etiqueta, ancho, estado) in enumerate(campos):
+            ttk.Label(alta, text=etiqueta).grid(row=i // 4, column=(i % 4) * 2, sticky="w", padx=6, pady=3)
+            var = tk.StringVar()
+            if clave == "comida":
+                widget = ttk.Combobox(alta, textvariable=var, state="readonly", width=ancho,
+                                      values=RECUENTO_COMIDAS_VALORES)
+                self.r24_combo_comida = widget
+            elif clave == "alimento":
+                widget = ttk.Combobox(alta, textvariable=var, width=ancho)
+                widget.bind("<KeyRelease>", self._autocompletar24h)
+                widget.bind("<<ComboboxSelected>>", self._seleccionar_alimento24h)
+                widget.bind("<FocusOut>", self._seleccionar_alimento24h)
+                widget.bind("<Return>", self._seleccionar_alimento24h)
+                self.r24_combo_alimento = widget
+                self.r24_agente_actual = widget
+            elif clave == "unidad":
+                widget = ttk.Combobox(alta, textvariable=var, width=ancho)
+            else:
+                widget = ttk.Entry(alta, textvariable=var, width=ancho)
+            widget.grid(row=i // 4, column=(i % 4) * 2 + 1, sticky="w", padx=6, pady=3)
+            setattr(self, f"r24_{clave}", var)
+        self.r24_comida.set(RECUENTO_COMIDAS[0][1])
+        self.r24_comida.trace_add("write", self._avanzar_tiempo24h)
+        self.r24_equiv.set("1")
+        ttk.Button(alta, text="Agregar a la lista", command=self._agregar_fila24h).grid(
+            row=3, column=10, sticky="w", padx=6, pady=3)
+        self.r24_info_var = tk.StringVar(
+            value="Escriba para autocompletar: el catálogo SMAE-5 completa cantidad de alimento, "
+                  "unidad, peso neto y nutrientes. «N.º de equivalentes» multiplica esos valores.")
+        ttk.Label(alta, textvariable=self.r24_info_var, foreground="#1f4e79").grid(
+            row=4, column=0, columnspan=12, sticky="w", padx=6, pady=(2, 4))
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True, padx=8, pady=4)
+        self.r24_tree = ttk.Treeview(
+            contenedor,
+            columns=("comida", "alimento", "cantidad", "equiv", "peso", "kcal", "prot", "lip",
+                     "hc", "fibra", "col", "grupo"),
+            show="headings", height=14, selectmode="extended",
+        )
+        encabezados = [
+            ("comida", "Tiempo de comida", 135), ("alimento", "Alimento", 165),
+            ("cantidad", "Cantidad alimento", 115), ("equiv", "N.º equiv.", 60),
+            ("peso", "P. neto (g)", 72),
+            ("kcal", "kcal", 52), ("prot", "Prot (g)", 60),
+            ("lip", "Lip (g)", 60), ("hc", "HC (g)", 55),
+            ("fibra", "Fibra (g)", 64), ("col", "Colest. (mg)", 74),
+            ("grupo", "Grupo SMAE-5", 125),
+        ]
+        for clave, texto, ancho in encabezados:
+            self.r24_tree.heading(clave, text=texto)
+            self.r24_tree.column(clave, width=ancho, anchor="center", stretch=(clave == "alimento"))
+        self.r24_tree.tag_configure("comida", font=("TkDefaultFont", 9, "bold"),
+                                    background="#dce9f7")
+        self.r24_tree.tag_configure("alimento", background="#f7fbff")
+        scroll = ttk.Scrollbar(contenedor, orient="vertical", command=self.r24_tree.yview)
+        self.r24_tree.configure(yscrollcommand=scroll.set)
+        self.r24_tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        totales = ttk.LabelFrame(tab, text="Totales por tiempo de comida y del día")
+        totales.pack(fill="x", padx=8, pady=4)
+        self.r24_resumen = ttk.Treeview(
+            totales,
+            columns=("comida", "n", "peso", "kcal", "prot", "lip", "hc", "fibra", "col"),
+            show="headings", height=len(RECUENTO_COMIDAS) + 1,
+        )
+        resumen_encabezados = [
+            ("comida", "Tiempo de comida", 170), ("n", "Alimentos", 70),
+            ("peso", "P. neto (g)", 80), ("kcal", "kcal", 65),
+            ("prot", "Prot (g)", 72), ("lip", "Lip (g)", 72),
+            ("hc", "HC (g)", 68), ("fibra", "Fibra (g)", 78),
+            ("col", "Colest. (mg)", 88),
+        ]
+        for clave, texto, ancho in resumen_encabezados:
+            self.r24_resumen.heading(clave, text=texto)
+            self.r24_resumen.column(clave, width=ancho, anchor="center", stretch=(clave == "comida"))
+        self.r24_resumen.tag_configure("total", font=("TkDefaultFont", 9, "bold"))
+        self.r24_resumen.pack(fill="x", padx=6, pady=6)
+        self.r24_totales_var = tk.StringVar(value="Kcal: 0 | Prot: 0 g | Lip: 0 g | HC: 0 g | Fibra: 0 g | Colesterol: 0 mg")
+        ttk.Label(totales, textvariable=self.r24_totales_var, font=("TkDefaultFont", 10, "bold")).pack(
+            anchor="w", padx=8, pady=(0, 6))
+
+        self._asegurar_smae5()
+
+    def _asegurar_smae5(self):
+        """Importa el catálogo SMAE-5 la primera vez (después de mostrar la ventana)."""
+        def _cargar():
+            try:
+                nuevos, total = importar_smae5()
+                self._smae_catalogo = None
+                self._smae_indice = None
+                if nuevos:
+                    self.status.config(text=f"Catálogo SMAE-5 cargado: {total} alimentos")
+                    if hasattr(self, "r24_alimento"):
+                        self.r24_info_var.set(
+                            f"Catálogo SMAE-5: {total} alimentos. Escriba para autocompletar; "
+                            "el equivalente completa cantidad, unidad, peso y nutrientes.")
+            except Exception as e:
+                self.status.config(text=f"Catálogo SMAE-5 no disponible: {e}")
+        self.after(150, _cargar)
+
+    def _cargar_catalogo_smae5(self):
+        """Catálogo SMAE-5 en memoria (índice por nombre normalizado, sin acentos)."""
+        if getattr(self, "_smae_catalogo", None) is None:
+            self._smae_catalogo = []
+            self._smae_indice = {}
+            try:
+                conn = conectar()
+                columnas = ["grupo", "alimento", "cantidad_sugerida", "unidad", "peso_bruto_g",
+                            "peso_neto_g", "kcal", "proteinas_g", "lipidos_g",
+                            "hidratos_carbono_g", "fibra_g"] + list(SMAE5_COLUMNAS_EXTRA)
+                filas = conn.execute(
+                    f"SELECT {','.join(columnas)} FROM alimentos_smae ORDER BY alimento").fetchall()
+                conn.close()
+            except sqlite3.Error:
+                filas = []
+            for fila in filas:
+                registro = dict(zip(columnas, fila))
+                registro["nombre"] = registro["alimento"]
+                registro["_norm"] = _smae5_normaliza(registro["alimento"])
+                self._smae_catalogo.append(registro)
+            self._smae_catalogo.sort(key=lambda r: r["_norm"])
+            for registro in self._smae_catalogo:
+                self._smae_indice.setdefault(registro["_norm"], registro)
+        return self._smae_catalogo
+
+    def _coincidencias_smae5(self, texto, limite=120):
+        """Ordena por coincidencia: inicio de texto, inicio de palabra y contenido."""
+        clave = _smae5_normaliza(texto or "")
+        if not clave:
+            return []
+        inicio, palabras, dentro = [], [], []
+        for registro in self._cargar_catalogo_smae5():
+            norm = registro["_norm"]
+            if norm.startswith(clave):
+                inicio.append(registro)
+            elif f" {clave}" in norm or norm.startswith(clave):
+                palabras.append(registro)
+            elif clave in norm:
+                dentro.append(registro)
+        return (inicio + palabras + dentro)[:limite]
+
+    def _autocompletar24h(self, event=None):
+        """Autocompletado del catálogo SMAE-5 mientras se escribe el alimento."""
+        if not hasattr(self, "r24_alimento"):
+            return None
+        texto = self.r24_alimento.get().strip()
+        coincidencias = self._coincidencias_smae5(texto)
+        self.r24_coincidencias = coincidencias
+        self.r24_combo_alimento.configure(values=[c["alimento"] for c in coincidencias])
+        if event is not None and event.widget is self.r24_agente_actual:
+            return "break"
+        return None
+
+    def _seleccionar_alimento24h(self, event=None):
+        """Al elegir o confirmar el alimento se rellenan los valores de la tabla SMAE-5."""
+        if not hasattr(self, "r24_alimento"):
+            return None
+        texto = self.r24_alimento.get().strip()
+        if not texto:
+            return None
+        registro = self._smae_indice.get(_smae5_normaliza(texto)) if self._smae_indice else None
+        if registro is None:
+            self._smae_catalogo = None
+            self._smae_indice = None
+            coincidencias = self._coincidencias_smae5(texto, 1)
+            registro = coincidencias[0] if coincidencias else None
+            if registro is not None:
+                self.r24_alimento.set(registro["alimento"])
+        self._cargar_equivalente24h(registro["alimento"] if registro else texto)
+        return None
+
+    def _formato_cantidad24h(self, valor):
+        numero = self._numero24h(valor, -1.0)
+        if numero < 0:
+            return "" if valor is None else str(valor).strip()
+        texto = f"{numero:.3f}".rstrip("0").rstrip(".")
+        return texto or "0"
+
+    def _cargar_equivalente24h(self, nombre):
+        """Al elegir el alimento se completa el equivalente SMAE-5 (cantidad y nutrientes)."""
+        if not nombre:
+            return None
+        registro = self._smae_indice.get(_smae5_normaliza(nombre)) if self._smae_indice else None
+        if registro is None:
+            registro = obtener_alimento_smae5(nombre)
+        if registro is None:
+            # Sin coincidencia: no dejar nutrientes del alimento anterior.
+            if self.r24_alimento_actual is not None:
+                for clave in ("cantidad", "unidad", "peso", "kcal", "prot", "lip", "hc",
+                              "fibra", "col"):
+                    getattr(self, f"r24_{clave}").set("")
+                self.r24_info_var.set(
+                    f"«{nombre}» no coincide con el catálogo SMAE-5. Capture la "
+                    "composición manualmente o elija una coincidencia de la lista.")
+            self.r24_alimento_actual = None
+            return None
+        self.r24_alimento_actual = registro
+        cantidad = self._formato_cantidad24h(registro["cantidad_sugerida"])
+        unidad = registro["unidad"] or ""
+        peso = registro["peso_neto_g"] or 0.0
+        self.r24_cantidad.set(cantidad)
+        self.r24_unidad.set(unidad)
+        self.r24_peso.set(f"{peso:.0f}")
+        equivalencia = {
+            "kcal": "kcal", "prot": "proteinas_g", "lip": "lipidos_g",
+            "hc": "hidratos_carbono_g", "fibra": "fibra_g", "col": "colesterol_mg",
+        }
+        for campo, columna in equivalencia.items():
+            valor = registro.get(columna)
+            valor = 0.0 if valor is None else float(valor)
+            getattr(self, f"r24_{campo}").set(f"{valor:g}")
+        chocolates = registro.get("azucar_por_equivalente_g") or 0.0
+        self.r24_info_var.set(
+            f"{registro['alimento']} | {registro['grupo']} | equivalente: "
+            f"{cantidad or '—'} {unidad or ''} = {peso:.0f} g"
+            + (f" | azúcar/equiv: {chocolates:g} g" if chocolates else ""))
+        return None
+
+    def _numero24h(self, texto, por_defecto=0.0):
+        try:
+            return float(str(texto).replace(",", ".").strip() or 0)
+        except (TypeError, ValueError):
+            return por_defecto
+
+    def _comida_canonica24h(self, valor):
+        """Acepta la clave, la etiqueta actual o una etiqueta antigua y devuelve la vigente."""
+        texto = (valor or "").strip()
+        if not texto:
+            return ""
+        for clave, etiqueta in RECUENTO_COMIDAS:
+            if texto in (clave, etiqueta):
+                return etiqueta
+        return RECUENTO_COMIDAS_LEGACY.get(texto, texto)
+
+    def _avanzar_tiempo24h(self, *_args):
+        """Tras agregar una fila, ofrece el siguiente tiempo de comida del día."""
+        if getattr(self, "_r24_ultimo_alimento", None):
+            self._r24_ultimo_alimento = None
+            actual = self._comida_canonica24h(self.r24_comida.get())
+            etiquetas = RECUENTO_COMIDAS_VALORES
+            if actual in etiquetas and etiquetas.index(actual) + 1 < len(etiquetas):
+                self.r24_comida.set(etiquetas[etiquetas.index(actual) + 1])
+
+    def _agregar_fila24h(self):
+        if not hasattr(self, "r24_tree"):
+            return
+        comida = self._comida_canonica24h(self.r24_comida.get())
+        if not comida:
+            messagebox.showwarning("Datos", "Seleccione el tiempo de comida.")
+            return
+        registro = self.r24_alimento_actual
+        nombre = self.r24_alimento.get().strip() or "Sin nombre"
+        unidad = self.r24_unidad.get().strip()
+        cantidad_texto = self.r24_cantidad.get().strip()
+        # «N.º de equivalentes» multiplica los valores del alimento introducido.
+        equivalentes = self._numero24h(self.r24_equiv.get(), 1.0)
+        if equivalentes <= 0:
+            messagebox.showwarning(
+                "Datos", "El número de equivalentes debe ser mayor que 0.")
+            return
+        peso_base = self._numero24h(self.r24_peso.get())
+        if not registro and peso_base <= 0:
+            messagebox.showwarning("Datos", "Ingrese el peso neto en gramos (> 0).")
+            return
+        factor = equivalentes
+        # Si la cantidad de alimento es numérica y difiere de la de referencia, escala.
+        base_cantidad = self._numero24h((registro or {}).get("cantidad_sugerida"), -1.0)
+        nueva_cantidad = self._numero24h(cantidad_texto, -1.0)
+        if base_cantidad > 0 and nueva_cantidad >= 0 and abs(nueva_cantidad - base_cantidad) > 1e-9:
+            factor *= nueva_cantidad / base_cantidad
+        peso = peso_base * factor if peso_base > 0 else 0.0
+        # El número de equivalentes también multiplica la cantidad de alimento.
+        if nueva_cantidad >= 0:
+            cantidad_final = self._formato_cantidad24h(nueva_cantidad * equivalentes)
+            detalle = (f"{cantidad_texto or '—'} {unidad} x {equivalentes:g} eq"
+                       f" = {cantidad_final} {unidad}").replace("  ", " ")
+        elif cantidad_texto:
+            cantidad_final = f"{cantidad_texto} x {equivalentes:g}"
+            detalle = f"{cantidad_texto} {unidad} x {equivalentes:g} eq"
+        else:
+            cantidad_final = f"{equivalentes:g} eq"
+            detalle = f"{equivalentes:g} equivalente(s) de {nombre}"
+        valores = {
+            "comida": comida,
+            "alimento": nombre,
+            "cantidad": " ".join(p for p in (cantidad_final, unidad) if p),
+            "equivalentes": equivalentes,
+            "peso": peso,
+            "kcal": self._numero24h(self.r24_kcal.get()) * factor,
+            "prot": self._numero24h(self.r24_prot.get()) * factor,
+            "lip": self._numero24h(self.r24_lip.get()) * factor,
+            "hc": self._numero24h(self.r24_hc.get()) * factor,
+            "fibra": self._numero24h(self.r24_fibra.get()) * factor,
+            "col": self._numero24h(self.r24_col.get()) * factor,
+            "grupo": (registro or {}).get("grupo", "Manual"),
+        }
+        self.r24_filas.append(valores)
+        self._pintar_arbol24h()
+        for clave in ("alimento", "cantidad", "unidad", "peso", "kcal", "prot", "lip", "hc", "fibra", "col"):
+            getattr(self, f"r24_{clave}").set("")
+        self.r24_equiv.set("1")
+        self.r24_alimento_actual = None
+        self._r24_ultimo_alimento = nombre
+        self._avanzar_tiempo24h()
+        if hasattr(self, "r24_combo_alimento"):
+            self.r24_combo_alimento.configure(values=[])
+        self.r24_info_var.set(
+            f"Agregado: {nombre} | {detalle} | {peso:.0f} g | "
+            f"{valores['kcal']:.0f} kcal. Escriba para autocompletar el siguiente alimento.")
+        self._calcular_recuento24h()
+
+    def _pintar_arbol24h(self):
+        """Dibuja la lista agrupada por tiempo de comida: cabecera + alimentos."""
+        self.r24_tree.delete(*self.r24_tree.get_children())
+        for etiqueta, cantidad, totales in self._resumen_por_comida24h(self.r24_filas):
+            grupo_id = self.r24_tree.insert(
+                "", "end", open=True, tags=("comida",),
+                values=[etiqueta, f"{cantidad} alimento(s)", "", "",
+                        f"{totales['peso']:.0f}", f"{totales['kcal']:.0f}",
+                        f"{totales['prot']:.1f}", f"{totales['lip']:.1f}", f"{totales['hc']:.1f}",
+                        f"{totales['fibra']:.1f}", f"{totales['col']:.1f}", ""])
+            for fila in self.r24_filas:
+                if fila["comida"] != etiqueta:
+                    continue
+                self.r24_tree.insert(grupo_id, "end", tags=("alimento",), values=[
+                    "", fila["alimento"], fila["cantidad"], f"{fila['equivalentes']:g}",
+                    f"{fila['peso']:.0f}", f"{fila['kcal']:.1f}", f"{fila['prot']:.1f}",
+                    f"{fila['lip']:.1f}", f"{fila['hc']:.1f}", f"{fila['fibra']:.1f}",
+                    f"{fila['col']:.1f}", fila["grupo"],
+                ])
+
+    def _eliminar_fila24h(self):
+        if not hasattr(self, "r24_tree"):
+            return
+        seleccion = self.r24_tree.selection()
+        if not seleccion:
+            return
+        eliminados = []
+        for item in seleccion:
+            hijos = self.r24_tree.get_children(item)
+            if hijos:
+                # Cabecera de tiempo de comida: se quita el grupo completo.
+                for hijo in hijos:
+                    valores = list(self.r24_tree.item(hijo, "values"))
+                    self.r24_filas = [
+                        f for f in self.r24_filas
+                        if not (f["alimento"] == valores[1] and f["cantidad"] == valores[2]
+                                and abs(f["kcal"] - self._numero24h(valores[5])) < 0.05)]
+                eliminados.append(valores[1])
+            else:
+                valores = list(self.r24_tree.item(item, "values"))
+                self.r24_filas = [
+                    f for f in self.r24_filas
+                    if not (f["alimento"] == valores[1] and f["cantidad"] == valores[2]
+                            and abs(f["kcal"] - self._numero24h(valores[5])) < 0.05)]
+                eliminados.append(valores[1])
+        self._pintar_arbol24h()
+        self._calcular_recuento24h()
+        self.status.config(text=f"Recuento 24 h | {len(eliminados)} alimento(s) eliminado(s)")
+
+    def _datos_recuento24h(self):
+        return [dict(f) for f in getattr(self, "r24_filas", [])]
+
+    def _totales24h(self, filas):
+        totales = {clave: 0.0 for clave in ("peso", "kcal", "prot", "lip", "hc", "fibra", "col")}
+        for fila in filas:
+            for clave in totales:
+                totales[clave] += fila.get(clave, 0.0)
+        return totales
+
+    def _resumen_por_comida24h(self, filas):
+        """Totales de cada tiempo de comida, en el orden canónico de RECUENTO_COMIDAS."""
+        resumen = []
+        for _clave, etiqueta in RECUENTO_COMIDAS:
+            propias = [f for f in filas if f.get("comida") == etiqueta]
+            if not propias:
+                continue
+            resumen.append((etiqueta, len(propias), self._totales24h(propias)))
+        return resumen
+
+    def _pintar_resumen24h(self, filas):
+        if not hasattr(self, "r24_resumen"):
+            return
+        self.r24_resumen.delete(*self.r24_resumen.get_children())
+        for etiqueta, cantidad, t in self._resumen_por_comida24h(filas):
+            self.r24_resumen.insert("", "end", values=[
+                etiqueta, cantidad, f"{t['peso']:.0f}", f"{t['kcal']:.0f}",
+                f"{t['prot']:.1f}", f"{t['lip']:.1f}", f"{t['hc']:.1f}",
+                f"{t['fibra']:.1f}", f"{t['col']:.1f}",
+            ])
+        dia = self._totales24h(filas)
+        self.r24_resumen.insert("", "end", values=[
+            "TOTAL DEL DÍA", len(filas), f"{dia['peso']:.0f}", f"{dia['kcal']:.0f}",
+            f"{dia['prot']:.1f}", f"{dia['lip']:.1f}", f"{dia['hc']:.1f}",
+            f"{dia['fibra']:.1f}", f"{dia['col']:.1f}",
+        ], tags=("total",))
+
+    def _calcular_recuento24h(self):
+        filas = self._datos_recuento24h()
+        self._pintar_resumen24h(filas)
+        t = self._totales24h(filas)
+        self.r24_totales_var.set(
+            f"Kcal: {t['kcal']:.0f} | Prot: {t['prot']:.1f} g | Lip: {t['lip']:.1f} g | "
+            f"HC: {t['hc']:.1f} g | Fibra: {t['fibra']:.1f} g | Colesterol: {t['col']:.1f} mg")
+        self.status.config(text=f"Recuento 24 h | {len(filas)} alimentos | {t['kcal']:.0f} kcal")
+
+    def _guardar_recuento24h(self):
+        if not self._exigir_paciente():
+            return
+        filas = self._datos_recuento24h()
+        if not filas:
+            messagebox.showwarning("Datos", "Agregue al menos un alimento.")
+            return
+        try:
+            conn = conectar()
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS recuento_24h (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       paciente_id INTEGER NOT NULL,
+                       fecha TEXT,
+                       filas_json TEXT,
+                       observaciones TEXT)""")
+            anterior = conn.execute(
+                "SELECT id FROM recuento_24h WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+            valores = (self._paciente_id, date.today().isoformat(),
+                       json.dumps(filas, ensure_ascii=False),
+                       getattr(self, "r24_obs", None).get("1.0", "end").strip()
+                       if getattr(self, "r24_obs", None) else "")
+            if anterior:
+                conn.execute(
+                    """UPDATE recuento_24h SET fecha=?, filas_json=?, observaciones=? WHERE id=?""",
+                    (valores[1], valores[2], valores[3], anterior[0]))
+            else:
+                conn.execute(
+                    """INSERT INTO recuento_24h (paciente_id, fecha, filas_json, observaciones)
+                       VALUES (?,?,?,?)""", valores)
+            conn.commit()
+            conn.close()
+            self.status.config(text=f"Recuento 24 h guardado | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Recuento de 24 horas guardado")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_recuento24h(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                "SELECT filas_json FROM recuento_24h WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+        except sqlite3.OperationalError:
+            fila = None
+        conn.close()
+        if fila is None:
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay recuentos de 24 horas guardados para este paciente")
+            return
+        try:
+            filas = json.loads(fila[0] or "[]")
+        except ValueError:
+            filas = []
+        for item in self.r24_tree.get_children():
+            self.r24_tree.delete(item)
+        self.r24_filas = []
+        for f in filas:
+            v = {
+                "comida": self._comida_canonica24h(f.get("comida", "")),
+                "alimento": f.get("alimento", ""),
+                "cantidad": f.get("cantidad", ""),
+                "equivalentes": self._numero24h(f.get("equivalentes", 1), 1.0),
+                "peso": self._numero24h(f.get("peso", 0)),
+                "kcal": self._numero24h(f.get("kcal", 0)),
+                "prot": self._numero24h(f.get("prot", 0)),
+                "lip": self._numero24h(f.get("lip", 0)),
+                "hc": self._numero24h(f.get("hc", 0)),
+                "fibra": self._numero24h(f.get("fibra", 0)),
+                "col": self._numero24h(f.get("col", 0)),
+                "grupo": f.get("grupo", "Manual"),
+            }
+            self.r24_filas.append(v)
+        self._pintar_arbol24h()
+        self._calcular_recuento24h()
+        self.status.config(text=f"Editando recuento 24 h | Paciente N° {self._paciente_id}")
+
+    def _limpiar_recuento24h(self):
+        if not hasattr(self, "r24_tree"):
+            return
+        self.r24_filas = []
+        self._pintar_arbol24h()
+        self._calcular_recuento24h()
+
+    def _imprimir_recuento24h_pdf(self):
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.units import cm
+            import os
+            from datetime import datetime
+            if not getattr(self, "_paciente_id", None):
+                if not self._exigir_paciente():
+                    return
+            filas = self._datos_recuento24h()
+            if not filas:
+                messagebox.showwarning("Datos", "Agregue al menos un alimento.")
+                return
+            conn = conectar()
+            fila_p = conn.execute(
+                "SELECT nombre, dni_hc, fecha_nacimiento, sexo FROM paciente WHERE id = ?",
+                (self._paciente_id,)).fetchone()
+            conn.close()
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ruta = filedialog.asksaveasfilename(
+                parent=self, title="Guardar Recuento 24 horas en PDF",
+                initialfile="recuento_24h_" + ts + ".pdf", defaultextension=".pdf",
+                filetypes=[("Archivo PDF", "*.pdf")])
+            if not ruta:
+                return
+            doc = SimpleDocTemplate(ruta, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm,
+                                    topMargin=1.5*cm, bottomMargin=1.5*cm)
+            styles = getSampleStyleSheet()
+            elementos = [Paragraph("RECUENTO DE 24 HORAS", styles["Title"]),
+                         Spacer(1, 0.3*cm)]
+            if fila_p:
+                elementos.append(Paragraph(
+                    f"Paciente: {fila_p[0] or ''} | Fecha nacimiento: {fila_p[2] or '-'} | "
+                    f"Fecha: {datetime.now().strftime('%d/%m/%Y')}", styles["Normal"]))
+                elementos.append(Spacer(1, 0.3*cm))
+            datos = [["Comida", "Alimento", "Cant. alimento", "N.º eq.", "P. neto (g)", "kcal",
+                      "Prot", "Lip", "HC", "Fibra", "Colest.", "Grupo SMAE-5"]]
+            for f in filas:
+                datos.append([f["comida"], f["alimento"], f["cantidad"],
+                              f"{f.get('equivalentes', 1):g}",
+                              f"{f['peso']:.0f}", f"{f['kcal']:.1f}", f"{f['prot']:.1f}",
+                              f"{f['lip']:.1f}", f"{f['hc']:.1f}", f"{f['fibra']:.1f}",
+                              f"{f['col']:.1f}", f["grupo"]])
+            t = self._totales24h(filas)
+            datos.append(["TOTALES", "", "", "", "", f"{t['kcal']:.0f}", f"{t['prot']:.1f}",
+                          f"{t['lip']:.1f}", f"{t['hc']:.1f}", f"{t['fibra']:.1f}",
+                          f"{t['col']:.1f}", ""])
+            tabla = Table(datos, repeatRows=1, colWidths=[2.1*cm, 3.2*cm, 1.5*cm, 1*cm,
+                                                         1.3*cm, 1*cm, 1*cm, 1*cm, 1*cm,
+                                                         1.1*cm, 1.3*cm, 2.1*cm])
+            tabla.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+                ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ]))
+            elementos.append(tabla)
+            elementos.append(Spacer(1, 0.5*cm))
+            resumen = [["Tiempo de comida", "Alimentos", "P. neto (g)", "kcal", "Prot",
+                        "Lip", "HC", "Fibra", "Colest."]]
+            for etiqueta, cantidad, totales in self._resumen_por_comida24h(filas):
+                resumen.append([etiqueta, cantidad, f"{totales['peso']:.0f}",
+                                f"{totales['kcal']:.0f}", f"{totales['prot']:.1f}",
+                                f"{totales['lip']:.1f}", f"{totales['hc']:.1f}",
+                                f"{totales['fibra']:.1f}", f"{totales['col']:.1f}"])
+            dia = self._totales24h(filas)
+            resumen.append(["TOTAL DEL DÍA", len(filas), f"{dia['peso']:.0f}",
+                            f"{dia['kcal']:.0f}", f"{dia['prot']:.1f}", f"{dia['lip']:.1f}",
+                            f"{dia['hc']:.1f}", f"{dia['fibra']:.1f}", f"{dia['col']:.1f}"])
+            tabla_resumen = Table(resumen, repeatRows=1, colWidths=[3.6*cm, 1.6*cm, 2*cm,
+                                                                    1.5*cm, 1.6*cm, 1.6*cm,
+                                                                    1.5*cm, 1.7*cm, 1.9*cm])
+            tabla_resumen.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+                ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ]))
+            elementos.append(Paragraph("Totales por tiempo de comida", styles["Heading3"]))
+            elementos.append(tabla_resumen)
+            elementos.append(Spacer(1, 0.4*cm))
+            elementos.append(Paragraph(
+                "Equivalentes y nutrientes tomados de la tabla SMAE-5 (data/SMAE-5.xlsx); el "
+                "número de equivalentes multiplica la cantidad de alimento, el peso y los "
+                "nutrientes. Revisar y ajustar según criterio clínico.",
+                styles["Normal"]))
+            doc.build(elementos)
+            if os.name == "nt" and hasattr(os, "startfile"):
+                os.startfile(ruta)
+            self.status.config(text=f"Recuento 24 h exportado a PDF: {ruta}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
