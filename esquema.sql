@@ -303,3 +303,6 @@ CREATE TABLE IF NOT EXISTS recuento_alimentario (
 CREATE INDEX IF NOT EXISTS idx_recuento_paciente ON recuento_alimentario(paciente_id);
 CREATE TABLE IF NOT EXISTS antecedentes_neonatal(id INTEGER PRIMARY KEY AUTOINCREMENT,paciente_id INTEGER NOT NULL,fecha_registro TEXT DEFAULT (datetime('now','localtime')),datos_json TEXT);
 CREATE INDEX IF NOT EXISTS idx_antecedentes_nn_paciente ON antecedentes_neonatal(paciente_id);
+
+CREATE TABLE IF NOT EXISTS distribucion_equivalentes(id INTEGER PRIMARY KEY AUTOINCREMENT,paciente_id INTEGER NOT NULL,energia_objetivo_kcal REAL,filas_json TEXT,macro_json TEXT,equiv_json TEXT,observaciones TEXT,fecha_registro TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS idx_distribucion_equiv_paciente ON distribucion_equivalentes(paciente_id);

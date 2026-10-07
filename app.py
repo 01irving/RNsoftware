@@ -371,6 +371,67 @@ RECUENTO_COMIDAS_LEGACY = {
     "Desayuno ": "Desayuno",
 }
 
+# Semana de la distribución de equivalentes: el cuadro de tiempos de comida
+# se captura por día y el cálculo muestra los 7 días.
+DIAS_SEMANA = [
+    ("lunes", "Lunes"), ("martes", "Martes"), ("miercoles", "Miércoles"),
+    ("jueves", "Jueves"), ("viernes", "Viernes"), ("sabado", "Sábado"),
+    ("domingo", "Domingo"),
+]
+DIAS_SEMANA_CLAVES = [clave for clave, _etiqueta in DIAS_SEMANA]
+DIAS_SEMANA_ETIQUETAS = {clave: etiqueta for clave, etiqueta in DIAS_SEMANA}
+
+# Cuadro dietosintético y distribución de equivalentes (base SMAE-5).
+# Cada renglón del cuadro es un equivalente del grupo; el valor que aporta
+# energía y nutrientes sale de la mediana de los equivalentes del grupo en la
+# tabla alimentos_smae (data/SMAE-5.xlsx).
+EQUIV_GRUPOS_SMAE = [
+    "Leche entera", "Leche semidescremada", "Leche descremada", "Leche con azúcar",
+    "Cereales sin grasa", "Cereales con grasa", "Leguminosas",
+    "AOA AAG", "AOA BAG", "AOA MAG", "AOA MBAG",
+    "Verduras", "Frutas",
+    "Aceites y grasas", "Aceites y grasas con proteina",
+    "Azucares sin grasa", "Azucares con grasa",
+    "Alimentos libres de energia",
+]
+# Grupos de la tabla SMAE-5 que no entran al cuadro dietosintético.
+EQUIV_GRUPOS_EXCLUIDOS = {"Bebidad alcoholicas", "Bebidas alcoholicas"}
+# Edad mínima para usar la distribución de equivalentes: 16 semanas de vida
+# (112 días). Antes de esa edad la pestaña 9 no se habilita.
+EQUIV_EDAD_MINIMA_DIAS = 112
+# Reparto de la energía por tiempo de comida, en el orden de RECUENTO_COMIDAS.
+EQUIV_PORCENTAJE_COMIDAS = {
+    "desayuno": 0.25,
+    "colacion_matutina": 0.10,
+    "comida": 0.30,
+    "colacion_vespertina": 0.15,
+    "cena": 0.20,
+    "otros": 0.00,
+}
+# Reparto de la energía por grupo de alimentos (%). Suma 100: es una
+# suggestion inicial que el profesional ajusta renglón por renglón.
+EQUIV_PORCENTAJE_GRUPOS = {
+    "Leche entera": 4.0, "Leche semidescremada": 3.0, "Leche descremada": 3.0,
+    "Leche con azúcar": 2.0,
+    "Cereales sin grasa": 18.0, "Cereales con grasa": 7.0,
+    "Leguminosas": 8.0,
+    "AOA AAG": 3.0, "AOA BAG": 5.0, "AOA MAG": 3.0, "AOA MBAG": 5.0,
+    "Verduras": 15.0, "Frutas": 12.0,
+    "Aceites y grasas": 4.0, "Aceites y grasas con proteina": 1.0,
+    "Azucares sin grasa": 3.0, "Azucares con grasa": 4.0,
+    "Alimentos libres de energia": 0.0,
+}
+EQUIV_NUTRIENTES = [("kcal", "kcal"), ("proteinas_g", "Proteína (g)"),
+                    ("lipidos_g", "Lípidos (g)"),
+                    ("hidratos_carbono_g", "HC (g)"), ("fibra_g", "Fibra (g)")]
+# Cuadro dietosintético: aporte de macronutrientes sobre la energía de las
+# ecuaciones predictivas. (clave, etiqueta, kcal por gramo, % por defecto).
+NUTRIENTES_CUADRO = [
+    ("proteinas", "Proteínas", 4.0, 15.0),
+    ("carbohidratos", "Carbohidratos", 4.0, 55.0),
+    ("grasas", "Grasas", 9.0, 30.0),
+]
+
 # Catálogo SMAE-5 (data/SMAE-5.xlsx). Cada fila trae el equivalente de referencia
 # (cantidad sugerida + unidad) con su peso neto y nutrientes ya calculados.
 SMAE5_XLSX = Path(__file__).resolve().parent / "data" / "SMAE-5.xlsx"
@@ -598,6 +659,61 @@ def obtener_alimento_smae5(nombre):
         return registro
     finally:
         conn.close()
+
+
+def _mediana(valores):
+    """Mediana de una lista, ignorando los valores ausentes."""
+    datos = sorted(valor for valor in valores if valor is not None)
+    if not datos:
+        return 0.0
+    medio = len(datos) // 2
+    if len(datos) % 2:
+        return float(datos[medio])
+    return (datos[medio - 1] + datos[medio]) / 2.0
+
+
+def composicion_equivalentes_smae5():
+    """Valor nutrimental mediano de un equivalente por grupo SMAE-5.
+
+    Cada fila de alimentos_smae es un equivalente de referencia (cantidad
+    sugerida + unidad) con su peso neto y nutrientes ya calculados, así que la
+    mediana del grupo es el valor de intercambio que usa el cuadro
+    dietosintético. Devuelve {grupo: {"n": ..., "kcal": ..., ...}}.
+    """
+    columnas = ["kcal", "proteinas_g", "lipidos_g", "hidratos_carbono_g", "fibra_g"]
+    conn = conectar()
+    try:
+        filas = conn.execute(
+            f"SELECT grupo, {','.join(columnas)} FROM alimentos_smae").fetchall()
+    finally:
+        conn.close()
+    acumulado = {}
+    for fila in filas:
+        grupo = fila[0]
+        if not grupo:
+            continue
+        acumulado.setdefault(grupo, []).append(fila[1:])
+    composicion = {}
+    for grupo, valores in acumulado.items():
+        entrada = {"n": len(valores)}
+        for indice, columna in enumerate(columnas):
+            entrada[columna] = _mediana([v[indice] for v in valores])
+        composicion[grupo] = entrada
+    return composicion
+
+
+def grupos_equivalentes_smae5():
+    """Grupos del cuadro dietosintético, en orden clínico y con su composición.
+
+    Se excluyen los grupos de EQUIV_GRUPOS_EXCLUIDOS (bebidas alcohólicas).
+    """
+    composicion = composicion_equivalentes_smae5()
+    grupos = [grupo for grupo in EQUIV_GRUPOS_SMAE
+              if grupo in composicion and grupo not in EQUIV_GRUPOS_EXCLUIDOS]
+    grupos += sorted(grupo for grupo in composicion
+                     if grupo not in EQUIV_GRUPOS_SMAE
+                     and grupo not in EQUIV_GRUPOS_EXCLUIDOS)
+    return grupos, composicion
 
 
 ANT_NN_SINO = ["Sí", "No", "No aplica"]
@@ -2666,6 +2782,16 @@ class App(tk.Tk):
                 conn.execute("ALTER TABLE estimacion_energetica DROP COLUMN mj_dia")
             except sqlite3.OperationalError:
                 pass
+        columnas_distro = [
+            fila[1] for fila in conn.execute(
+                "PRAGMA table_info(distribucion_equivalentes)")
+        ]
+        if columnas_distro and "macro_json" not in columnas_distro:
+            conn.execute(
+                "ALTER TABLE distribucion_equivalentes ADD COLUMN macro_json TEXT")
+        if columnas_distro and "equiv_json" not in columnas_distro:
+            conn.execute(
+                "ALTER TABLE distribucion_equivalentes ADD COLUMN equiv_json TEXT")
         conn.commit()
 
     def _cargar_referencias(self, conn):
@@ -2937,6 +3063,7 @@ class App(tk.Tk):
         self._tab_farmaco()
         self._tab_bioquimica()
         self._tab_ecuaciones()
+        self._tab_distribucion_equivalentes()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -5266,9 +5393,10 @@ class App(tk.Tk):
         dias = self._parsedias_desde_nacimiento()
         if dias is None:
             self.campos["edad"].set("")
-            return
-        semanas, resto = divmod(dias, 7)
-        self.campos["edad"].set(f"{semanas} semanas y {resto} días")
+        else:
+            semanas, resto = divmod(dias, 7)
+            self.campos["edad"].set(f"{semanas} semanas y {resto} días")
+        self._actualizar_disponibilidad_calculo_equivalentes()
 
     def _clasificar(self):
         self._clasificar_peso_nacer(silencioso=False)
@@ -7227,6 +7355,881 @@ class App(tk.Tk):
             messagebox.showinfo(
                 "Editar", "Antecedentes cargados para este paciente")
 
+    # ---------- Pestaña 9 Distribución de equivalentes ----------
+    def _formato_equivalentes(self, valor):
+        if abs(valor) < 0.0001:
+            return ""
+        return f"{valor:g}"
+
+    def _composicion_equivalentes(self):
+        """Composición mediana por grupo, cacheada en la sesión."""
+        cache = getattr(self, "_eq_composicion", None)
+        if cache is None:
+            cache = composicion_equivalentes_smae5()
+            self._eq_composicion = cache
+        return cache
+
+    def _actualizar_disponibilidad_calculo_equivalentes(self, *_args):
+        """Vuelve a dibujar el cálculo por día o, si el paciente no cumple la
+        edad, deja el bloque con el aviso de bloqueo."""
+        if not getattr(self, "eq_calc_celdas", None):
+            return
+        self._recalcular_calculo_equivalentes()
+
+    def _motivo_bloqueo_equivalentes(self):
+        """Aviso si la distribución de equivalentes todavía no corresponde
+        abrir; None cuando el paciente ya cumple la edad mínima."""
+        dias = self._parsedias_desde_nacimiento()
+        if dias is None:
+            return ("No se encontró la fecha de nacimiento del paciente.\n"
+                    "Cárguela en la pestaña Paciente para usar la "
+                    "distribución de equivalentes.")
+        if dias < EQUIV_EDAD_MINIMA_DIAS:
+            semanas, resto = divmod(dias, 7)
+            return (f"Edad no válida: la distribución de equivalentes se "
+                    f"habilita a partir de {EQUIV_EDAD_MINIMA_DIAS // 7} semanas "
+                    f"de vida (4 meses cumplidos).\n"
+                    f"Edad actual: {semanas} semanas y {resto} días.")
+        return None
+
+    def _tab_distribucion_equivalentes(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="9. Distribución de equivalentes")
+        self._tab_equiv = tab
+        self.eq_vars = {}
+        self.eq_total_fila = {}
+        self.eq_total_comida = {}
+        self._eq_composicion = None
+        self.eq_dia = DIAS_SEMANA_CLAVES[0]
+        self.eq_datos_dias = {clave: {} for clave in DIAS_SEMANA_CLAVES}
+        self.eq_grupos, composicion = grupos_equivalentes_smae5()
+        atajo = {"colacion_matutina": "Col. matutina",
+                 "colacion_vespertina": "Col. vespertina"}
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="Energía estimada (kcal/día):").pack(side="left", padx=5)
+        self.eq_kcal_objetivo = ttk.Entry(barra, width=10, justify="right")
+        self.eq_kcal_objetivo.pack(side="left", padx=3)
+        self.eq_kcal_origen = ttk.Label(barra, text="", foreground="#1E6E5C")
+        self.eq_kcal_origen.pack(side="left", padx=6)
+        ttk.Button(barra, text="Tomar de Ecuaciones",
+                   command=self._tomar_kcal_equivalentes).pack(side="left", padx=3)
+        ttk.Button(barra, text="Calcular reparto",
+                   command=self._calcular_reparto_equivalentes).pack(side="left", padx=3)
+        ttk.Button(barra, text="Guardar",
+                   command=self._guardar_distribucion_equivalentes).pack(side="right", padx=3)
+        ttk.Button(barra, text="Editar",
+                   command=self._editar_distribucion_equivalentes).pack(side="right", padx=3)
+        ttk.Button(barra, text="Limpiar",
+                   command=self._limpiar_distribucion_equivalentes).pack(side="right", padx=3)
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        interior.bind("<Configure>",
+                      lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(ventana, width=e.width))
+        canvas.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+        # --- Cuadro dietosintético: macronutrientes ---
+        marco_macro = ttk.LabelFrame(
+            interior, text="Cuadro dietosintético: aporte diario de macronutrientes")
+        marco_macro.pack(fill="x", padx=10, pady=6)
+        for indice, titulo in enumerate(
+                ["Nutrientes", "Porcentaje", "kcal", "g", "g/kg"]):
+            ttk.Label(marco_macro, text=titulo, font=("TkDefaultFont", 9, "bold"),
+                      width=16 if indice == 0 else 10,
+                      anchor="w" if indice == 0 else "center").grid(
+                row=0, column=indice, padx=8, pady=3)
+        self.nut_pct = {}
+        self.nut_celdas = {}
+        for fila, (clave, etiqueta, factor, porcentaje) in enumerate(
+                NUTRIENTES_CUADRO, start=1):
+            ttk.Label(marco_macro, text=etiqueta, width=16, anchor="w").grid(
+                row=fila, column=0, sticky="w", padx=8, pady=2)
+            var = tk.StringVar(value=f"{porcentaje:g}")
+            entrada = ttk.Entry(marco_macro, textvariable=var, width=10,
+                                justify="center")
+            entrada.grid(row=fila, column=1, padx=8, pady=2)
+            entrada.bind("<KeyRelease>", lambda e: self._recalcular_macronutrientes())
+            self.nut_pct[clave] = (var, factor)
+            self.nut_celdas[clave] = []
+            for columna in (2, 3, 4):
+                celda = ttk.Label(marco_macro, text="0", width=10, anchor="center")
+                celda.grid(row=fila, column=columna, padx=8, pady=2)
+                self.nut_celdas[clave].append(celda)
+        fila_total = len(NUTRIENTES_CUADRO) + 1
+        negrita = ("TkDefaultFont", 9, "bold")
+        ttk.Label(marco_macro, text="TOTAL", width=16, anchor="w",
+                  font=negrita).grid(row=fila_total, column=0, sticky="w",
+                                     padx=8, pady=(4, 2))
+        self.nut_total_pct = ttk.Label(marco_macro, text="0", width=10, anchor="center",
+                                       font=negrita)
+        self.nut_total_pct.grid(row=fila_total, column=1, padx=8, pady=(4, 2))
+        self.nut_total_celdas = []
+        for columna in (2, 3, 4):
+            celda = ttk.Label(marco_macro, text="0", width=10, anchor="center",
+                              font=negrita)
+            celda.grid(row=fila_total, column=columna, padx=8, pady=(4, 2))
+            self.nut_total_celdas.append(celda)
+        self.nut_origen = ttk.Label(marco_macro, text="", foreground="#555555",
+                                    font=("TkDefaultFont", 9))
+        self.nut_origen.grid(row=fila_total + 1, column=0, columnspan=5,
+                             sticky="w", padx=8, pady=(0, 5))
+
+        # --- Cálculo de equivalentes: totales por día de la semana ---
+        marco_calc = ttk.LabelFrame(
+            interior,
+            text="Cálculo de equivalentes por día (tomado del cuadro de distribución)")
+        marco_calc.pack(fill="x", padx=10, pady=6)
+        columnas_calc = DIAS_SEMANA + [("semana", "Semana")]
+        ttk.Label(marco_calc, text="Aporte diario", font=negrita, width=26,
+                  anchor="w").grid(row=0, column=0, sticky="w", padx=6, pady=3)
+        for indice, (_clave, etiqueta) in enumerate(columnas_calc, start=1):
+            ttk.Label(marco_calc, text=etiqueta, font=negrita, width=13,
+                      anchor="center").grid(row=0, column=indice, padx=6, pady=3)
+        self.eq_calc_filas = [
+            ("eq", "Equivalentes", "{:g}"),
+            ("kcal", "kcal", "{:.0f}"),
+            ("prot", "Proteína (g)", "{:.1f}"),
+            ("hc", "Carbohidratos (g)", "{:.1f}"),
+            ("lip", "Grasas (g)", "{:.1f}"),
+            ("dif", "Diferencia con el objetivo (kcal)", "{:+.0f}"),
+        ]
+        self.eq_calc_celdas = {}
+        for fila, (clave, etiqueta, _formato) in enumerate(
+                self.eq_calc_filas, start=1):
+            fuente = {"font": negrita} if clave == "dif" else {}
+            ttk.Label(marco_calc, text=etiqueta, width=26, anchor="w",
+                      **fuente).grid(row=fila, column=0, sticky="w", padx=6, pady=1)
+            celdas = []
+            for columna in range(1, len(columnas_calc) + 1):
+                celda = ttk.Label(marco_calc, text="0", width=13, anchor="center",
+                                  **fuente)
+                celda.grid(row=fila, column=columna, padx=6, pady=1)
+                celdas.append(celda)
+            self.eq_calc_celdas[clave] = celdas
+        self.eq_calc_resumen = ttk.Label(marco_calc, text="", justify="left",
+                                         font=("TkDefaultFont", 9, "bold"))
+        self.eq_calc_resumen.grid(row=len(self.eq_calc_filas) + 1, column=0,
+                                  columnspan=len(columnas_calc) + 1, sticky="w",
+                                  padx=6, pady=(4, 2))
+        ttk.Label(
+            marco_calc,
+            text="Los números salen del cuadro de distribución: capture los "
+                 "equivalentes de cada tiempo de coma del día elegido y aquí se "
+                 "suman los 7 días para compararlos con el cuadro dietosintético.",
+            foreground="#555555", wraplength=980, justify="left").grid(
+            row=len(self.eq_calc_filas) + 2, column=0,
+            columnspan=len(columnas_calc) + 1, sticky="w", padx=6, pady=(0, 6))
+
+        # --- Selector del día de la semana ---
+        marco_dia = ttk.Frame(interior)
+        marco_dia.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(marco_dia, text="Día de la semana:",
+                  font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(4, 8))
+        self.eq_dia_var = tk.StringVar(value=self.eq_dia)
+        for clave, etiqueta in DIAS_SEMANA:
+            ttk.Radiobutton(
+                marco_dia, text=etiqueta, value=clave, variable=self.eq_dia_var,
+                command=self._cambiar_dia_equivalentes).pack(side="left", padx=3)
+
+        # --- Distribución de equivalentes por tiempo de comida ---
+        marco_cuadro = ttk.LabelFrame(
+            interior, text="Distribución de equivalentes por grupo y tiempo de comida")
+        marco_cuadro.pack(fill="x", padx=10, pady=6)
+        self.marco_cuadro = marco_cuadro
+        marco_cuadro.config(text=self._titulo_cuadro_equivalentes())
+        ttk.Label(marco_cuadro, text="Grupo de alimentos (SMAE-5)",
+                  width=26, anchor="w").grid(row=0, column=0, sticky="w", padx=6, pady=3)
+        for indice, (clave, etiqueta) in enumerate(RECUENTO_COMIDAS, start=1):
+            ttk.Label(marco_cuadro, text=atajo.get(clave, etiqueta),
+                      width=13, anchor="center").grid(row=0, column=indice, padx=2, pady=3)
+        ttk.Label(marco_cuadro, text="Total", width=10,
+                  anchor="center").grid(row=0, column=len(RECUENTO_COMIDAS) + 1, padx=2, pady=3)
+
+        for fila, grupo in enumerate(self.eq_grupos, start=1):
+            ttk.Label(marco_cuadro, text=grupo, width=26, anchor="w").grid(
+                row=fila, column=0, sticky="w", padx=6)
+            for indice, (clave, _etiqueta) in enumerate(RECUENTO_COMIDAS, start=1):
+                var = tk.StringVar(value="0")
+                entrada = ttk.Entry(marco_cuadro, textvariable=var, width=13,
+                                    justify="center")
+                entrada.grid(row=fila, column=indice, padx=2, pady=1)
+                entrada.bind("<KeyRelease>", lambda e: self._recalcular_equivalentes())
+                self.eq_vars[(grupo, clave)] = var
+            etiqueta_total = ttk.Label(marco_cuadro, text="", width=10, anchor="center")
+            etiqueta_total.grid(row=fila, column=len(RECUENTO_COMIDAS) + 1, padx=2)
+            self.eq_total_fila[grupo] = etiqueta_total
+
+        fila_total = len(self.eq_grupos) + 1
+        ttk.Label(marco_cuadro, text="TOTAL DEL DÍA",
+                  width=26, anchor="w", font=("TkDefaultFont", 9, "bold")).grid(
+            row=fila_total, column=0, sticky="w", padx=6, pady=(4, 2))
+        for indice, (clave, _etiqueta) in enumerate(RECUENTO_COMIDAS, start=1):
+            etiqueta = ttk.Label(marco_cuadro, text="0", width=13, anchor="center",
+                                 font=("TkDefaultFont", 9, "bold"))
+            etiqueta.grid(row=fila_total, column=indice, padx=2, pady=(4, 2))
+            self.eq_total_comida[clave] = etiqueta
+        self.eq_total_dia = ttk.Label(marco_cuadro, text="0", width=10, anchor="center",
+                                      font=("TkDefaultFont", 9, "bold"))
+        self.eq_total_dia.grid(row=fila_total, column=len(RECUENTO_COMIDAS) + 1,
+                               padx=2, pady=(4, 2))
+
+        # --- Distribución de equivalentes ---
+        marco_dist = ttk.LabelFrame(
+            interior, text="Distribución de equivalentes y valor nutrimental "
+                           "(mediana SMAE-5)")
+        marco_dist.pack(fill="both", expand=True, padx=10, pady=6)
+        self.marco_dist = marco_dist
+        columnas_tree = ["grupo", "eq", "kcal_eq", "kcal", "prot", "lip", "hc", "fibra", "pct"]
+        titulos = ["Grupo de alimentos", "Equivalentes", "kcal/eq", "kcal",
+                   "Proteína (g)", "Lípidos (g)", "HC (g)", "Fibra (g)", "% kcal"]
+        anchos = [230, 84, 70, 70, 84, 84, 84, 84, 70]
+        self.eq_tree = ttk.Treeview(marco_dist, columns=columnas_tree, show="headings",
+                                    height=len(self.eq_grupos) + 2)
+        for columna, titulo, ancho in zip(columnas_tree, titulos, anchos):
+            self.eq_tree.heading(columna, text=titulo)
+            self.eq_tree.column(columna, width=ancho, anchor="e" if columna != "grupo" else "w",
+                                stretch=(columna == "grupo"))
+        self.eq_tree.tag_configure("total", font=("TkDefaultFont", 9, "bold"))
+        self.eq_tree.tag_configure("par", background="#F4F7F6")
+        self.eq_tree.pack(side="top", fill="both", expand=True)
+
+        self.eq_resumen = ttk.Label(interior, text="", justify="left",
+                                    font=("TkDefaultFont", 9, "bold"))
+        self.eq_resumen.pack(fill="x", padx=14, pady=(0, 8))
+        ttk.Label(
+            interior,
+            text="La energía objetivo se toma de los cálculos de la pestaña Ecuaciones. "
+                 "Elija el día de la semana y capture los equivalentes de cada tiempo de "
+                 "coma: el cuadro dietosintético y el cálculo comparan los 7 días con la "
+                 "energía diaria. El valor nutrimental de cada equivalente es la mediana "
+                 "de ese grupo en la tabla SMAE-5. El reparto calculado se aplica a los 7 "
+                 "días y es una sugerencia: ajuste cada celda a la prescripción.",
+            foreground="#555555", wraplength=980, justify="left").pack(fill="x", padx=14, pady=(0, 10))
+
+        self._recalcular_equivalentes()
+        tab.bind("<Map>", self._actualizar_disponibilidad_calculo_equivalentes)
+        self._actualizar_disponibilidad_calculo_equivalentes()
+
+    def _equivalentes_celda(self, grupo, comida):
+        var = self.eq_vars.get((grupo, comida))
+        if var is None:
+            return 0.0
+        try:
+            valor = float(str(var.get()).replace(",", ".").strip() or 0)
+        except ValueError:
+            return 0.0
+        return valor if valor > 0 else 0.0
+
+    def _recalcular_equivalentes(self):
+        if not getattr(self, "eq_vars", None):
+            return
+        self.eq_datos_dias[self.eq_dia] = self._filas_distribucion_equivalentes()
+        composicion = self._composicion_equivalentes()
+        totales_comida = {clave: 0.0 for clave, _etiqueta in RECUENTO_COMIDAS}
+        acumulado = {"eq": 0.0, "kcal": 0.0, "prot": 0.0, "lip": 0.0,
+                     "hc": 0.0, "fibra": 0.0}
+        filas = []
+        for grupo in self.eq_grupos:
+            suma = 0.0
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                cantidad = self._equivalentes_celda(grupo, clave)
+                suma += cantidad
+                totales_comida[clave] += cantidad
+            datos = composicion.get(grupo, {})
+            kcal_eq = datos.get("kcal", 0.0)
+            prot_eq = datos.get("proteinas_g", 0.0)
+            lip_eq = datos.get("lipidos_g", 0.0)
+            hc_eq = datos.get("hidratos_carbono_g", 0.0)
+            fibra_eq = datos.get("fibra_g", 0.0)
+            kcal = suma * kcal_eq
+            prot = suma * prot_eq
+            lip = suma * lip_eq
+            hc = suma * hc_eq
+            fibra = suma * fibra_eq
+            self.eq_total_fila[grupo].config(text=self._formato_equivalentes(suma))
+            filas.append((grupo, suma, kcal_eq, kcal, prot, lip, hc, fibra, datos.get("n", 0)))
+            acumulado["eq"] += suma
+            acumulado["kcal"] += kcal
+            acumulado["prot"] += prot
+            acumulado["lip"] += lip
+            acumulado["hc"] += hc
+            acumulado["fibra"] += fibra
+
+        self.eq_tree.delete(*self.eq_tree.get_children())
+        for indice, (grupo, suma, kcal_eq, kcal, prot, lip, hc, fibra, _n) in enumerate(filas):
+            porcentaje = (kcal / acumulado["kcal"] * 100) if acumulado["kcal"] > 0 else 0.0
+            self.eq_tree.insert(
+                "", "end", iid=grupo,
+                values=(grupo, f"{suma:g}", f"{kcal_eq:.0f}", f"{kcal:.0f}",
+                        f"{prot:.1f}", f"{lip:.1f}", f"{hc:.1f}", f"{fibra:.1f}",
+                        f"{porcentaje:.1f}%"),
+                tags=("par",) if indice % 2 else ())
+        self.eq_tree.insert(
+            "", "end", iid="__total__",
+            values=("TOTAL DEL DÍA", f"{acumulado['eq']:g}", "",
+                    f"{acumulado['kcal']:.0f}", f"{acumulado['prot']:.1f}",
+                    f"{acumulado['lip']:.1f}", f"{acumulado['hc']:.1f}",
+                    f"{acumulado['fibra']:.1f}", "100.0%"), tags=("total",))
+
+        for clave, _etiqueta in RECUENTO_COMIDAS:
+            self.eq_total_comida[clave].config(
+                text=self._formato_equivalentes(totales_comida[clave]))
+        self.eq_total_dia.config(text=self._formato_equivalentes(acumulado["eq"]))
+        self._escribir_resumen_equivalentes(acumulado)
+        self._recalcular_macronutrientes()
+
+    def _titulo_cuadro_equivalentes(self, clave_dia=None):
+        """Título del cuadro de tiempos de comida con el día que se captura."""
+        clave = clave_dia or self.eq_dia
+        return ("Distribución de equivalentes por grupo y tiempo de comida — "
+                + DIAS_SEMANA_ETIQUETAS.get(clave, clave))
+
+    def _cargar_dia_en_cuadro(self, clave_dia):
+        """Vuelca al cuadro de tiempos de coma los equivalentes guardados del día."""
+        datos = self.eq_datos_dias.get(clave_dia) or {}
+        for grupo in self.eq_grupos:
+            capturas = datos.get(grupo) or {}
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                var = self.eq_vars.get((grupo, clave))
+                if var is not None:
+                    var.set(str(capturas.get(clave) or "0"))
+        self.marco_cuadro.config(text=self._titulo_cuadro_equivalentes(clave_dia))
+        if getattr(self, "marco_dist", None):
+            self.marco_dist.config(
+                text="Distribución de equivalentes y valor nutrimental "
+                     "(mediana SMAE-5) — "
+                     + DIAS_SEMANA_ETIQUETAS.get(clave_dia, clave_dia))
+
+    def _cambiar_dia_equivalentes(self):
+        """Guarda el día que se estaba capturando y abre el elegido."""
+        if not getattr(self, "eq_vars", None):
+            return
+        nuevo = self.eq_dia_var.get()
+        if nuevo not in DIAS_SEMANA_CLAVES:
+            nuevo = DIAS_SEMANA_CLAVES[0]
+        self.eq_datos_dias[self.eq_dia] = self._filas_distribucion_equivalentes()
+        self.eq_dia = nuevo
+        self._cargar_dia_en_cuadro(nuevo)
+        self._recalcular_equivalentes()
+
+    def _peso_actual_equivalentes(self):
+        """Peso actual del paciente en kg (última visita) y de dónde sale."""
+        if not getattr(self, "_paciente_id", None):
+            return None, ""
+        conn = conectar()
+        try:
+            visita = conn.execute(
+                """SELECT peso_actual_g FROM visita_ganancia_peso
+                   WHERE paciente_id = ? ORDER BY fecha_registro DESC, id DESC LIMIT 1""",
+                (self._paciente_id,)).fetchone()
+            if visita and visita[0]:
+                return float(visita[0]) / 1000.0, "peso de la última visita"
+            ecuaciones = conn.execute(
+                "SELECT peso_kg FROM estimacion_energetica "
+                "WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            ecuaciones = None
+        finally:
+            conn.close()
+        if ecuaciones and ecuaciones[0]:
+            return float(ecuaciones[0]), "peso usado en las ecuaciones"
+        return None, "sin peso registrado"
+
+    def _porcentajes_macro(self):
+        porcentajes = {}
+        for clave, _etiqueta, _factor, _defecto in NUTRIENTES_CUADRO:
+            var, _factor_nutriente = self.nut_pct[clave]
+            texto = str(var.get()).replace(",", ".").strip()
+            try:
+                valor = float(texto or 0)
+            except ValueError:
+                valor = 0.0
+            porcentajes[clave] = valor if valor > 0 else 0.0
+        return porcentajes
+
+    def _recalcular_macronutrientes(self):
+        """Convierte el porcentaje a kcal (sobre la energía de Ecuaciones), a
+        gramos (÷4 en proteínas y carbohidratos, ÷9 en grasas) y a g/kg."""
+        if not getattr(self, "nut_pct", None):
+            return
+        kcal, _detalle = self._energia_estimada_equivalentes()
+        if not kcal:
+            kcal = self._kcal_objetivo_equivalentes()
+        peso, peso_origen = self._peso_actual_equivalentes()
+        porcentajes = self._porcentajes_macro()
+        totales = {"pct": 0.0, "kcal": 0.0, "g": 0.0}
+        gramos_nutriente = {}
+        for clave, _etiqueta, factor, _defecto in NUTRIENTES_CUADRO:
+            porcentaje = porcentajes.get(clave, 0.0)
+            kcal_fila = kcal * porcentaje / 100.0 if kcal else 0.0
+            gramos = kcal_fila / factor if factor else 0.0
+            gkg = gramos / peso if peso else None
+            kcal_txt, gramos_txt, gkg_txt = self._formatos_macro(
+                kcal_fila, gramos, gkg)
+            for celda, texto in zip(self.nut_celdas[clave],
+                                    (kcal_txt, gramos_txt, gkg_txt)):
+                celda.config(text=texto)
+            totales["pct"] += porcentaje
+            totales["kcal"] += kcal_fila
+            totales["g"] += gramos
+            gramos_nutriente[clave] = gramos
+        self.nut_objetivo = {"kcal": totales["kcal"]}
+        self.nut_objetivo.update(gramos_nutriente)
+        gkg_total = totales["g"] / peso if peso else None
+        for celda, texto in zip(
+                self.nut_total_celdas,
+                (f"{totales['kcal']:.0f}" if kcal else "0",
+                 f"{totales['g']:.1f}" if kcal else "0",
+                 f"{gkg_total:.2f}" if gkg_total is not None else "—")):
+            celda.config(text=texto)
+        self.nut_total_pct.config(text=f"{totales['pct']:g} %")
+        self.nut_total_pct.config(
+            foreground="#C0392B" if abs(totales["pct"] - 100) > 0.01 else "#1E6E5C")
+        partes = []
+        if kcal:
+            _grupo, detalle = self._energia_estimada_equivalentes()
+            partes.append(
+                f"Energía: {kcal:.0f} kcal/día de Ecuaciones"
+                + (f" ({detalle})" if detalle else ""))
+        else:
+            partes.append("Energía: sin cálculo en la pestaña Ecuaciones")
+        partes.append(
+            f"Peso actual: {peso:.3f} kg ({peso_origen})" if peso
+            else "Sin peso actual: la columna g/kg no puede calcularse")
+        self.nut_origen.config(text="   |   ".join(partes))
+        self._recalcular_calculo_equivalentes()
+
+    @staticmethod
+    def _formatos_macro(kcal, gramos, gkg):
+        return (f"{kcal:.0f}" if kcal else "0",
+                f"{gramos:.1f}" if kcal else "0",
+                f"{gkg:.2f}" if gkg is not None else "—")
+
+    @staticmethod
+    def _numero_equivalentes(texto):
+        """Equivalentes escritos como texto (admite coma decimal)."""
+        try:
+            valor = float(str(texto).replace(",", ".").strip() or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return valor if valor > 0 else 0.0
+
+    def _equivalentes_texto(self, var):
+        """Números escritos en una caja de equivalentes (admite coma decimal)."""
+        try:
+            return self._numero_equivalentes(var.get())
+        except AttributeError:
+            return 0.0
+
+    def _totales_dia_equivalentes(self, clave_dia):
+        """Aporte energético y nutrimental de un día de la semana."""
+        composicion = self._composicion_equivalentes()
+        datos = self.eq_datos_dias.get(clave_dia) or {}
+        totales = {"eq": 0.0, "kcal": 0.0, "prot": 0.0, "hc": 0.0, "lip": 0.0}
+        for grupo in self.eq_grupos:
+            capturas = datos.get(grupo) or {}
+            equivalente = sum(self._numero_equivalentes(capturas.get(comida))
+                              for comida, _etiqueta in RECUENTO_COMIDAS)
+            if equivalente <= 0:
+                continue
+            nutriente = composicion.get(grupo, {})
+            totales["eq"] += equivalente
+            totales["kcal"] += equivalente * (nutriente.get("kcal") or 0.0)
+            totales["prot"] += equivalente * (nutriente.get("proteinas_g") or 0.0)
+            totales["hc"] += equivalente * (nutriente.get("hidratos_carbono_g") or 0.0)
+            totales["lip"] += equivalente * (nutriente.get("lipidos_g") or 0.0)
+        return totales
+
+    def _totales_semana_equivalentes(self):
+        """Totales de los 7 días, en el orden de DIAS_SEMANA, y su suma."""
+        por_dia = [self._totales_dia_equivalentes(clave)
+                   for clave in DIAS_SEMANA_CLAVES]
+        semana = {clave: sum(dia[clave] for dia in por_dia)
+                  for clave in ("eq", "kcal", "prot", "hc", "lip")}
+        return por_dia, semana
+
+    def _recalcular_calculo_equivalentes(self):
+        """Tabla de cálculo: aporte de cada día de la semana y total semanal,
+        comparado con los valores del cuadro dietosintético."""
+        if not getattr(self, "eq_calc_celdas", None):
+            return
+        motivo = self._motivo_bloqueo_equivalentes()
+        if motivo:
+            for celdas in self.eq_calc_celdas.values():
+                for celda in celdas:
+                    celda.config(text="—", foreground="#C0392B")
+            self.eq_calc_resumen.config(
+                text="Cálculo de equivalentes bloqueado\n" + motivo,
+                foreground="#C0392B")
+            return
+        objetivo = getattr(self, "nut_objetivo", None) or {}
+        kcal_objetivo = objetivo.get("kcal") or 0.0
+        por_dia, semana = self._totales_semana_equivalentes()
+        columnas = list(por_dia) + [semana]
+        dias = len(DIAS_SEMANA_CLAVES)
+        for fila, _etiqueta, formato in self.eq_calc_filas:
+            for indice, celda in enumerate(self.eq_calc_celdas[fila]):
+                if indice >= len(columnas):
+                    break
+                totales = columnas[indice]
+                es_semana = indice == len(columnas) - 1
+                if fila == "dif":
+                    if kcal_objetivo <= 0:
+                        celda.config(text="—", foreground="#555555")
+                        continue
+                    base = kcal_objetivo * (dias if es_semana else 1)
+                    diferencia = totales["kcal"] - base
+                    dentro = abs(diferencia / base * 100) <= 2.0
+                    celda.config(text=formato.format(diferencia),
+                                 foreground="#1E6E5C" if dentro else "#C0392B")
+                else:
+                    celda.config(text=formato.format(totales[fila]),
+                                 foreground="#000000")
+        self._escribir_comparacion_equivalentes(semana, por_dia)
+
+    def _escribir_comparacion_equivalentes(self, semana, por_dia):
+        objetivo = getattr(self, "nut_objetivo", None) or {}
+        kcal_objetivo = objetivo.get("kcal") or 0.0
+        if not kcal_objetivo:
+            self.eq_calc_resumen.config(
+                text="Objetivo del cuadro dietosintético: sin energía capturada\n"
+                     f"Semana con los equivalentes: {semana['kcal']:.0f} kcal · "
+                     f"{semana['eq']:g} equivalentes",
+                foreground="#555555")
+            return
+        dias = len(DIAS_SEMANA_CLAVES)
+        objetivo_semana = kcal_objetivo * dias
+        diferencia = semana["kcal"] - objetivo_semana
+        pct = diferencia / objetivo_semana * 100 if objetivo_semana else 0.0
+        lineas = [
+            "Objetivo del cuadro dietosintético: "
+            f"{kcal_objetivo:.0f} kcal/día · {objetivo_semana:.0f} kcal en {dias} días",
+            "Semana con los equivalentes:            "
+            f"{semana['kcal']:.0f} kcal · {semana['eq']:g} equivalentes",
+            f"Diferencia de la semana:               {diferencia:+.0f} kcal ({pct:+.1f} %) · "
+            f"{semana['prot'] - (objetivo.get('proteinas') or 0) * dias:+.1f} g proteína · "
+            f"{semana['hc'] - (objetivo.get('carbohidratos') or 0) * dias:+.1f} g carbohidratos · "
+            f"{semana['lip'] - (objetivo.get('grasas') or 0) * dias:+.1f} g grasas",
+        ]
+        vacios = [DIAS_SEMANA_ETIQUETAS[clave] for clave, dia
+                  in zip(DIAS_SEMANA_CLAVES, por_dia) if dia["eq"] <= 0]
+        if vacios:
+            lineas.append("Días sin equivalentes capturados: " + ", ".join(vacios))
+        self.eq_calc_resumen.config(
+            text="\n".join(lineas),
+            foreground="#1E6E5C" if abs(pct) <= 2.0 else "#C0392B")
+
+    def _escribir_resumen_equivalentes(self, acumulado):
+        objetivo = 0.0
+        try:
+            objetivo = float(str(self.eq_kcal_objetivo.get()).replace(",", ".").strip() or 0)
+        except (AttributeError, ValueError):
+            objetivo = 0.0
+        dia = DIAS_SEMANA_ETIQUETAS.get(getattr(self, "eq_dia", ""), "")
+        etiqueta = f"Total de {dia}" if dia else "Total"
+        partes = [f"{etiqueta}: {acumulado['kcal']:.0f} kcal · "
+                  f"{acumulado['eq']:g} equivalentes"]
+        if objetivo > 0:
+            diferencia = acumulado["kcal"] - objetivo
+            partes.append(
+                f"Objetivo: {objetivo:.0f} kcal · diferencia {diferencia:+.0f} kcal "
+                f"({diferencia / objetivo * 100:+.1f} %)")
+        energia_prot = acumulado["prot"] * 4
+        energia_lip = acumulado["lip"] * 9
+        energia_hc = acumulado["hc"] * 4
+        energia_total = energia_prot + energia_lip + energia_hc
+        if energia_total > 0:
+            partes.append(
+                "Aporte de energía: "
+                f"HC {energia_hc / energia_total * 100:.0f} % · "
+                f"proteína {energia_prot / energia_total * 100:.0f} % · "
+                f"lípidos {energia_lip / energia_total * 100:.0f} %")
+        partes.append(
+            f"Promedios por equivalente: {acumulado['prot'] / acumulado['eq']:.1f} g proteína, "
+            f"{acumulado['lip'] / acumulado['eq']:.1f} g lípidos y "
+            f"{acumulado['hc'] / acumulado['eq']:.1f} g HC"
+            if acumulado["eq"] > 0 else "Promedios por equivalente: —")
+        self.eq_resumen.config(text="   |   ".join(partes))
+
+    def _kcal_objetivo_equivalentes(self):
+        try:
+            valor = float(str(self.eq_kcal_objetivo.get()).replace(",", ".").strip() or 0)
+        except (AttributeError, ValueError):
+            return 0.0
+        return valor if valor > 0 else 0.0
+
+    def _energia_estimada_equivalentes(self):
+        """Energía estimada en la pestaña de Ecuaciones (última guardada).
+
+        Devuelve (kcal_dia, detalle) con el grupo, sexo, alimentación y peso que
+        usaron los cálculos, para mostrar de dónde sale el objetivo.
+        """
+        if not getattr(self, "_paciente_id", None):
+            return None, ""
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                """SELECT grupo, sexo, alimentacion, peso_kg, kcal_dia
+                   FROM estimacion_energetica WHERE paciente_id = ?
+                   ORDER BY id DESC LIMIT 1""", (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            fila = None
+        conn.close()
+        if fila is None or fila[4] is None:
+            return None, ""
+        grupo, sexo, alimentacion, peso_kg, kcal_dia = fila
+        partes = [str(grupo) if grupo else "", str(sexo) if sexo else "",
+                  str(alimentacion) if alimentacion else ""]
+        if peso_kg is not None:
+            partes.append(f"{float(peso_kg):.3f} kg")
+        return float(kcal_dia), " · ".join(p for p in partes if p)
+
+    def _tomar_kcal_equivalentes(self):
+        if not self._exigir_paciente():
+            return
+        kcal, detalle = self._energia_estimada_equivalentes()
+        if not kcal:
+            messagebox.showinfo(
+                "Energía estimada",
+                "Este paciente no tiene una estimación energética guardada.\n"
+                "Calculela en la pestaña de Ecuaciones o escriba el valor aquí.")
+            return
+        self.eq_kcal_objetivo.delete(0, "end")
+        self.eq_kcal_objetivo.insert(0, f"{kcal:.0f}")
+        self.eq_kcal_origen.config(
+            text=f"de Ecuaciones ({detalle})" if detalle else "de Ecuaciones")
+        self._recalcular_equivalentes()
+        self.status.config(
+            text=f"Energía estimada cargada | Paciente N° {self._paciente_id}")
+
+    def _calcular_reparto_equivalentes(self):
+        if not self._exigir_paciente():
+            return
+        kcal = self._kcal_objetivo_equivalentes()
+        if kcal <= 0:
+            self._tomar_kcal_equivalentes()
+            kcal = self._kcal_objetivo_equivalentes()
+        if kcal <= 0:
+            messagebox.showwarning(
+                "Calcular reparto",
+                "Indique la energía estimada en kcal/día para calcular el reparto.")
+            return
+        composicion = self._composicion_equivalentes()
+        reparto = {}
+        for grupo in self.eq_grupos:
+            porcentaje = EQUIV_PORCENTAJE_GRUPOS.get(grupo, 0.0)
+            kcal_eq = composicion.get(grupo, {}).get("kcal", 0.0)
+            objetivo_fila = 0.0 if kcal_eq <= 0 else kcal * porcentaje / 100.0 / kcal_eq
+            objetivo_fila = math.floor(objetivo_fila / 0.5 + 0.5) * 0.5
+            celdas = {}
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                valor = objetivo_fila * EQUIV_PORCENTAJE_COMIDAS.get(clave, 0.0)
+                celdas[clave] = math.floor(valor / 0.5 + 0.5) * 0.5
+            diferencia = objetivo_fila - sum(celdas.values())
+            if abs(diferencia) >= 0.5:
+                mayor = max(celdas,
+                            key=lambda clave: objetivo_fila * EQUIV_PORCENTAJE_COMIDAS.get(clave, 0.0))
+                celdas[mayor] = max(
+                    0.0, math.floor((celdas[mayor] + diferencia) / 0.5 + 0.5) * 0.5)
+            reparto[grupo] = {clave: self._formato_equivalentes(valor)
+                              for clave, valor in celdas.items()}
+        for clave_dia in DIAS_SEMANA_CLAVES:
+            self.eq_datos_dias[clave_dia] = {
+                grupo: dict(valores) for grupo, valores in reparto.items()}
+        self._cargar_dia_en_cuadro(self.eq_dia)
+        self._recalcular_equivalentes()
+        self.status.config(
+            text=f"Reparto de equivalentes calculado sobre {kcal:.0f} kcal/día en los 7 días"
+                 f" | Paciente N° {self._paciente_id}")
+        messagebox.showinfo(
+            "Reparto calculado",
+            f"Se repartieron los equivalentes sobre {kcal:.0f} kcal/día en los 7 días "
+            "de la semana.\n"
+            "Revise y ajuste cada celda del cuadro según la prescripción.")
+
+    def _filas_distribucion_equivalentes(self):
+        filas = {}
+        for grupo in self.eq_grupos:
+            valores = {}
+            for clave, _comida in RECUENTO_COMIDAS:
+                valores[clave] = self.eq_vars[(grupo, clave)].get().strip()
+            filas[grupo] = valores
+        return filas
+
+    def _semana_distribucion_equivalentes(self):
+        """Cuadro completo de la semana, guardando el día que está en pantalla."""
+        semana = dict(self.eq_datos_dias)
+        semana[self.eq_dia] = self._filas_distribucion_equivalentes()
+        return {clave: semana.get(clave) or {} for clave in DIAS_SEMANA_CLAVES}
+
+    @staticmethod
+    def _semana_desde_filas(filas):
+        """Acepta el cuadro por día o el de versiones anteriores (un solo cuadro,
+        que se repite en los 7 días)."""
+        filas = filas or {}
+        if not filas:
+            return {}
+        if all(clave in DIAS_SEMANA_CLAVES for clave in filas):
+            return {clave: filas.get(clave) or {} for clave in DIAS_SEMANA_CLAVES}
+        return {clave: filas for clave in DIAS_SEMANA_CLAVES}
+
+    def _fijar_filas_distribucion_equivalentes(self, filas, energia_objetivo=None):
+        self.eq_datos_dias = {
+            clave: valores for clave, valores
+            in self._semana_desde_filas(filas).items()}
+        for clave in DIAS_SEMANA_CLAVES:
+            self.eq_datos_dias.setdefault(clave, {})
+        self._cargar_dia_en_cuadro(self.eq_dia)
+        if energia_objetivo:
+            self.eq_kcal_objetivo.delete(0, "end")
+            self.eq_kcal_objetivo.insert(0, f"{float(energia_objetivo):.0f}")
+        self._recalcular_equivalentes()
+
+    def _limpiar_distribucion_equivalentes(self, avisar=True):
+        for clave in DIAS_SEMANA_CLAVES:
+            self.eq_datos_dias[clave] = {}
+        for grupo in self.eq_grupos:
+            for clave, _comida in RECUENTO_COMIDAS:
+                self.eq_vars[(grupo, clave)].set("0")
+        self._recalcular_equivalentes()
+        if avisar:
+            self.status.config(text="Cuadro dietosintético limpiado")
+
+    def _crear_tabla_distribucion_equivalentes(self, cur):
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS distribucion_equivalentes (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   energia_objetivo_kcal REAL,
+                   filas_json TEXT,
+                   observaciones TEXT,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')))""")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_distribucion_equiv_paciente "
+            "ON distribucion_equivalentes(paciente_id)")
+        columnas = [fila[1] for fila in
+                    cur.execute("PRAGMA table_info(distribucion_equivalentes)")]
+        if "macro_json" not in columnas:
+            cur.execute("ALTER TABLE distribucion_equivalentes ADD COLUMN macro_json TEXT")
+        if "equiv_json" not in columnas:
+            cur.execute("ALTER TABLE distribucion_equivalentes ADD COLUMN equiv_json TEXT")
+
+    def _guardar_distribucion_equivalentes(self):
+        if not self._exigir_paciente():
+            return
+        filas = self._semana_distribucion_equivalentes()
+        total = sum(self._numero_equivalentes(valor)
+                    for dia in filas.values()
+                    for valores in dia.values()
+                    for valor in valores.values())
+        if total <= 0:
+            messagebox.showwarning(
+                "Guardar", "El cuadro no tiene equivalentes capturados")
+            return
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            self._crear_tabla_distribucion_equivalentes(cur)
+            existente = cur.execute(
+                "SELECT id FROM distribucion_equivalentes WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1", (self._paciente_id,)).fetchone()
+            energia = self._kcal_objetivo_equivalentes() or None
+            texto = json.dumps(filas, ensure_ascii=False)
+            macro = json.dumps(self._porcentajes_macro(), ensure_ascii=False)
+            equiv = json.dumps({}, ensure_ascii=False)
+            if existente:
+                cur.execute(
+                    """UPDATE distribucion_equivalentes
+                       SET energia_objetivo_kcal = ?, filas_json = ?, macro_json = ?,
+                           equiv_json = ?,
+                           fecha_registro = datetime('now','localtime')
+                       WHERE id = ?""",
+                    (energia, texto, macro, equiv, existente[0]))
+            else:
+                cur.execute(
+                    """INSERT INTO distribucion_equivalentes
+                       (paciente_id, energia_objetivo_kcal, filas_json, macro_json,
+                        equiv_json)
+                       VALUES (?,?,?,?,?)""",
+                    (self._paciente_id, energia, texto, macro, equiv))
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Distribución de equivalentes guardada | Paciente N° {self._paciente_id}")
+            self._cargar_ultimos_datos()
+            messagebox.showinfo("Guardado", "Distribución de equivalentes guardada")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_distribucion_equivalentes(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        kcal_calculada, detalle = self._energia_estimada_equivalentes()
+        conn = conectar()
+        try:
+            self._crear_tabla_distribucion_equivalentes(conn.cursor())
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        try:
+            fila = conn.execute(
+                """SELECT energia_objetivo_kcal, filas_json, macro_json, equiv_json
+                   FROM distribucion_equivalentes WHERE paciente_id = ?
+                   ORDER BY id DESC LIMIT 1""", (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            try:
+                carga = conn.execute(
+                    """SELECT energia_objetivo_kcal, filas_json
+                       FROM distribucion_equivalentes WHERE paciente_id = ?
+                       ORDER BY id DESC LIMIT 1""", (self._paciente_id,)).fetchone()
+                fila = (carga[0], carga[1], None, None) if carga else None
+            except sqlite3.Error:
+                fila = None
+        conn.close()
+        if fila is not None and fila[2]:
+            try:
+                macro = json.loads(fila[2] or "{}")
+            except (TypeError, ValueError):
+                macro = {}
+            for clave, _etiqueta, _factor, _defecto in NUTRIENTES_CUADRO:
+                if clave in macro:
+                    self.nut_pct[clave][0].set(str(macro[clave]))
+        if kcal_calculada:
+            # El objetivo siempre es la energía calculada en la pestaña 9.
+            self.eq_kcal_objetivo.delete(0, "end")
+            self.eq_kcal_objetivo.insert(0, f"{kcal_calculada:.0f}")
+            self.eq_kcal_origen.config(
+                text=f"de Ecuaciones ({detalle})" if detalle else "de Ecuaciones")
+        if fila is None:
+            self._limpiar_distribucion_equivalentes(avisar=False)
+            if not silencioso:
+                messagebox.showinfo(
+                    "Editar", "No hay distribución de equivalentes guardada para este paciente")
+            return
+        try:
+            filas = json.loads(fila[1] or "{}")
+        except (TypeError, ValueError):
+            filas = {}
+        self._fijar_filas_distribucion_equivalentes(
+            filas, None if kcal_calculada else fila[0])
+        self.status.config(
+            text=f"Editando distribución de equivalentes | Paciente N° {self._paciente_id}")
+
     def _ver_evaluaciones(self):
         """Selecciona la pestaña de Antecedentes y desplaza a las evaluaciones OMS."""
         self.notebook.select(self._tab_ant)
@@ -7430,8 +8433,10 @@ class App(tk.Tk):
         self._editar_farmaco(silencioso=True)
         self._editar_bioquimica(silencioso=True)
         self._editar_recuento(silencioso=True)
+        self._editar_distribucion_equivalentes(silencioso=True)
+        self._actualizar_disponibilidad_calculo_equivalentes()
         self.status.config(
-            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos) | Paciente N° {self._paciente_id}"
+            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos, equivalentes) | Paciente N° {self._paciente_id}"
         )
 
 if __name__ == "__main__":
