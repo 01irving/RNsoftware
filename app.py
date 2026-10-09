@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import math
+import os
 import re
 import sqlite3
 import tkinter as tk
@@ -357,6 +358,322 @@ RECUENTO_COMIDAS = [
     ("otros", "Otros / refrigerio"),
 ]
 RECUENTO_COMIDAS_CLAVES = [c[0] for c in RECUENTO_COMIDAS]
+
+# Diagnóstico nutricio — Paso 2 del PAN (enunciado PESS).
+# Terminología de referencia: Academy of Nutrition and Dietetics
+# (IDNT / eNCPT), por dominio: Ingestión (NI), Clínico (NC) y
+# Conductual-Ambiental (NB). Verifique el código vigente de la edición que use.
+CATEGORIAS_DIAGNOSTICO = ("Ingestión", "Clínico", "Conductual-Ambiental")
+
+DIAGNOSTICOS_NUTRICIOS = {
+    "Ingestión": [
+        ("NI-1.4", "Ingesta de energía inadecuada"),
+        ("NI-1.5", "Ingesta de energía excesiva"),
+        ("NI-1.6", "Ingesta de energía prevista subóptima"),
+        ("NI-1.7", "Ingesta de energía prevista excesiva"),
+        ("NI-2.1", "Ingesta oral inadecuada"),
+        ("NI-2.2", "Ingesta oral excesiva"),
+        ("NI-2.3", "Infusión de nutrición enteral inadecuada"),
+        ("NI-2.4", "Infusión de nutrición enteral excesiva"),
+        ("NI-2.5", "Nutrición enteral subóptima"),
+        ("NI-2.6", "Infusión de nutrición parenteral inadecuada"),
+        ("NI-2.7", "Infusión de nutrición parenteral excesiva"),
+        ("NI-2.8", "Nutrición parenteral subóptima"),
+        ("NI-2.9", "Aceptación limitada de alimentos"),
+        ("NI-3.1", "Ingesta de líquidos inadecuada"),
+        ("NI-3.2", "Ingesta de líquidos excesiva"),
+        ("NI-4.1", "Ingesta inadecuada de sustancias bioactivas"),
+        ("NI-4.2", "Ingesta excesiva de sustancias bioactivas"),
+        ("NI-4.3", "Ingesta excesiva de alcohol"),
+        ("NI-5.1", "Necesidades aumentadas de nutrientes"),
+        ("NI-5.2", "Malnutrición"),
+        ("NI-5.3", "Ingesta de proteína y energía inadecuada"),
+        ("NI-5.4", "Necesidades disminuidas de nutrientes"),
+        ("NI-5.5", "Desequilibrio de nutrientes"),
+        ("NI-5.6.1", "Ingesta inadecuada de grasas"),
+        ("NI-5.6.2", "Ingesta excesiva de grasas"),
+        ("NI-5.6.3", "Ingesta inapropiada de grasas en los alimentos"),
+        ("NI-5.7.1", "Ingesta inadecuada de proteína"),
+        ("NI-5.7.2", "Ingesta excesiva de proteína"),
+        ("NI-5.8.1", "Ingesta inadecuada de carbohidratos"),
+        ("NI-5.8.2", "Ingesta excesiva de carbohidratos"),
+        ("NI-5.8.3", "Ingesta inapropiada de tipos de carbohidratos"),
+        ("NI-5.8.4", "Ingesta inconsistente de carbohidratos"),
+        ("NI-5.8.5", "Ingesta inadecuada de fibra"),
+        ("NI-5.8.6", "Ingesta excesiva de fibra"),
+        ("NI-5.9.1", "Ingesta inadecuada de vitaminas"),
+        ("NI-5.9.2", "Ingesta excesiva de vitaminas"),
+        ("NI-5.10.1", "Ingesta inadecuada de minerales"),
+        ("NI-5.10.2", "Ingesta excesiva de minerales"),
+        ("NI-5.11.1", "Ingesta subóptima de múltiples nutrientes"),
+    ],
+    "Clínico": [
+        ("NC-1.1", "Dificultad para deglutir"),
+        ("NC-1.2", "Dificultad para masticar"),
+        ("NC-1.3", "Dificultad para amamantar"),
+        ("NC-1.4", "Función gastrointestinal alterada"),
+        ("NC-2.1", "Utilización alterada de nutrientes"),
+        ("NC-2.2", "Valores de laboratorio alterados relacionados con la nutrición"),
+        ("NC-2.3", "Interacción fármaco-alimento"),
+        ("NC-2.4", "Interacción fármaco-alimento prevista"),
+        ("NC-3.1", "Peso insuficiente"),
+        ("NC-3.2", "Pérdida de peso involuntaria"),
+        ("NC-3.3", "Sobrepeso / obesidad"),
+        ("NC-3.4", "Aumento de peso involuntario"),
+        ("NC-3.5", "Aumento de peso inadecuado en la niñez"),
+        ("NC-3.6", "Velocidad de crecimiento excesiva"),
+    ],
+    "Conductual-Ambiental": [
+        ("NB-1.1", "Deficiencia de conocimientos sobre alimentos y nutrición"),
+        ("NB-1.2", "Creencias o actitudes perjudiciales sobre alimentos y nutrición"),
+        ("NB-1.3", "No está listo para el cambio de dieta o de estilo de vida"),
+        ("NB-1.4", "Deficiencia de auto-monitoreo"),
+        ("NB-1.5", "Patrón de alimentación desordenado"),
+        ("NB-1.6", "Adherencia limitada a las recomendaciones de nutrición"),
+        ("NB-1.7", "Elecciones alimentarias inadecuadas"),
+        ("NB-2.1", "Inactividad física"),
+        ("NB-2.2", "Actividad física excesiva"),
+        ("NB-2.3", "Incapacidad o falta de deseo de manejar el autocuidado"),
+        ("NB-2.4", "Habilidad deteriorada para preparar alimentos o comidas"),
+        ("NB-2.5", "Calidad de vida relacionada con la nutrición deficiente"),
+        ("NB-2.6", "Dificultad para alimentarse por sí mismo"),
+        ("NB-3.1", "Ingesta de alimentos no seguros"),
+        ("NB-3.2", "Acceso limitado a alimentos o agua"),
+        ("NB-3.3", "Acceso limitado a insumos de nutrición"),
+    ],
+}
+
+SIN_DIAGNOSTICO_NUTRICIO = ("NO-1.1", "Sin diagnóstico nutricio en este momento")
+
+# Signos y síntomas habituales de la evaluación nutricia (Paso 1 del PAN)
+# para la captura en el enunciado PESS (S – evidenciado por).
+SIGNOS_SINTOMAS_PES = {
+    "Antropométricos": [
+        "Peso bajo para la edad",
+        "Pérdida de peso referida u objetivada",
+        "Aumento de peso insuficiente",
+        "Cambio de percentil o DS en las curvas",
+        "Talla baja para la edad",
+        "IMC o índice ponderal alterado",
+        "Pliegues cutáneos disminuidos",
+        "Circunferencia cefálica alterada",
+    ],
+    "Clínicos": [
+        "Inapetencia",
+        "Náuseas y/o vómitos",
+        "Diarrea",
+        "Estreñimiento",
+        "Distensión y/o dolor abdominal",
+        "Regurgitación o reflujo",
+        "Dificultad para deglutir o masticar",
+        "Fatiga o debilidad",
+        "Edema",
+        "Fiebre",
+        "Palidez de piel y mucosas",
+        "Alteraciones en piel, cabello o uñas",
+    ],
+    "Dietéticos / Ingesta": [
+        "Ingesta oral inadecuada referida",
+        "Omite tiempos de comida",
+        "Consumo excesivo de bebidas azucaradas",
+        "Alimentación selectiva",
+        "Consumo inadecuado de frutas y verduras",
+        "Consumo inadecuado de proteína",
+        "Lactancia materna ineficaz o difícil",
+        "Uso inadecuado de suplementos",
+        "Disponibilidad insuficiente de alimentos en el hogar",
+    ],
+    "Bioquímicos / Laboratorio": [
+        "Hemoglobina o hematocrito bajos",
+        "Albúmina sérica baja",
+        "Glucosa alterada",
+        "Electrolitos alterados",
+        "Perfil de lípidos alterado",
+        "Vitaminas o minerales séricos bajos",
+    ],
+}
+
+# Intervención nutricional (Paso 3 del PAN). Términos tomados del "Manual de
+# terminología en nutrición" (Academy of Nutrition and Dietetics, eNCPT/IDNT):
+# Prescripción nutricia (NP) y dominios ND, E, C y RC con sus códigos TIND.
+INTERVENCIONES_PAN = [
+    "ND-1.1 — Dieta general/correcta",
+    "ND-1.2 — Composición de alimentos/colaciones",
+    "ND-1.2 — Dieta modificada en consistencia",
+    "ND-1.2 — Dieta modificada en energía",
+    "ND-1.2 — Dieta modificada en proteína",
+    "ND-1.2 — Dieta modificada en hidratos de carbono",
+    "ND-1.2 — Dieta modificada en lípidos",
+    "ND-1.2 — Dieta modificada en fibra",
+    "ND-1.2 — Dieta modificada en líquidos",
+    "ND-1.2 — Dieta modificada para alimento/ingrediente específico",
+    "ND-1.2 — Dieta modificada en vitaminas",
+    "ND-1.2 — Dieta modificada en nutrimentos inorgánicos",
+    "ND-1.3 — Horario de las comidas/líquidos",
+    "ND-1.4 — Alimentos/bebidas específicos o grupos",
+    "ND-1.5 — Otros (Comidas y colaciones)",
+    "ND-2.1.1 — Nutrición enteral: composición",
+    "ND-2.1.2 — Nutrición enteral: concentración",
+    "ND-2.1.3 — Nutrición enteral: velocidad",
+    "ND-2.1.4 — Nutrición enteral: volumen",
+    "ND-2.1.5 — Nutrición enteral: horario",
+    "ND-2.1.6 — Nutrición enteral: vía",
+    "ND-2.1.7 — Inserción de la sonda enteral",
+    "ND-2.1.8 — Cuidado del sitio (enteral)",
+    "ND-2.1.9 — Lavado de la sonda",
+    "ND-2.2.1 — Nutrición parenteral: composición",
+    "ND-2.2.2 — Nutrición parenteral: concentración",
+    "ND-2.2.3 — Nutrición parenteral: velocidad",
+    "ND-2.2.4 — Nutrición parenteral: horario",
+    "ND-2.2.5 — Nutrición parenteral: vía",
+    "ND-2.2.6 — Cuidado del sitio (parenteral)",
+    "ND-2.2.7 — Líquidos intravenosos",
+    "ND-3.1.1 — Suplemento: bebida comercial",
+    "ND-3.1.2 — Suplemento: alimento comercial",
+    "ND-3.1.3 — Suplemento: bebida modificada",
+    "ND-3.1.4 — Suplemento: alimento modificado",
+    "ND-3.1.5 — Suplemento: propósito",
+    "ND-3.2.1 — Multivitaminas/multinutrimentos inorgánicos",
+    "ND-3.2.2 — Multi elementos traza",
+    "ND-3.2.3 — Vitamina (A/C/D/E/K, tiamina, riboflavina, niacina, folatos, B6, B12, biotina)",
+    "ND-3.2.4 — Nutrimento inorgánico (calcio, hierro, zinc, magnesio, etc.)",
+    "ND-3.3.1 — Esteroles de plantas",
+    "ND-3.3.2 — Estanoles de plantas",
+    "ND-3.3.3 — Proteína de soya",
+    "ND-3.3.4 — Psyllium",
+    "ND-3.3.5 — ß-glucano",
+    "ND-3.3.6 — Aditivos de alimentos",
+    "ND-3.3.7 — Alcohol",
+    "ND-3.3.8 — Cafeína",
+    "ND-3.3.9 — Otro (sustancias bioactivas)",
+    "ND-4.1 — Equipo adaptativo para comer",
+    "ND-4.2 — Postura para la alimentación",
+    "ND-4.3 — Acomodo de las comidas",
+    "ND-4.4 — Cuidado bucal",
+    "ND-4.5 — Asistencia para la selección de menús",
+    "ND-4.6 — Otros (asistencia para la alimentación)",
+    "ND-5.1 — Entorno: luz",
+    "ND-5.2 — Entorno: olores",
+    "ND-5.3 — Entorno: distracciones",
+    "ND-5.4 — Entorno: altura de la mesa",
+    "ND-5.5 — Entorno: servicio en la mesa",
+    "ND-5.6 — Entorno: temperatura del cuarto",
+    "ND-5.7 — Entorno: servicio de alimentación",
+    "ND-5.8 — Entorno: ubicación de las comidas",
+    "ND-5.9 — Otro (entorno de alimentación)",
+    "ND-6.1 — Prescripción de medicamentos",
+    "ND-6.2 — Medicamentos libres de receta",
+    "ND-6.3 — Medicina complementaria/alternativa relacionada con nutrición",
+    "E-1.1 — Educación nutricia: propósito de la educación",
+    "E-1.2 — Educación nutricia: modificaciones prioritarias",
+    "E-1.3 — Educación nutricia: información de sobrevivencia",
+    "E-1.4 — Educación nutricia: relación nutrición-salud/enfermedad",
+    "E-1.5 — Educación nutricia: modificaciones recomendadas",
+    "E-1.6 — Educación nutricia: otros temas relacionados",
+    "E-1.7 — Educación nutricia: otro",
+    "E-2.1 — Educación nutricia: interpretación de resultados",
+    "E-2.2 — Educación nutricia: desarrollo de habilidades",
+    "E-2.3 — Educación nutricia: otro (aplicación)",
+    "C-1.1 — Asesoría nutricial: teoría cognitivo-conductual",
+    "C-1.2 — Asesoría nutricial: modelo de creencias de salud",
+    "C-1.3 — Asesoría nutricial: teoría del aprendizaje social",
+    "C-1.4 — Asesoría nutricial: modelo transteórico/Estados de Cambio",
+    "C-1.5 — Asesoría nutricial: otro (enfoque teórico)",
+    "C-2.1 — Asesoría nutricial: entrevista motivacional",
+    "C-2.2 — Asesoría nutricial: establecimiento de metas",
+    "C-2.3 — Asesoría nutricial: automonitoreo",
+    "C-2.4 — Asesoría nutricial: resolución de problemas",
+    "C-2.5 — Asesoría nutricial: apoyo social",
+    "C-2.6 — Asesoría nutricial: manejo de estrés",
+    "C-2.7 — Asesoría nutricial: control de estímulos",
+    "C-2.8 — Asesoría nutricial: reestructuración cognitiva",
+    "C-2.9 — Asesoría nutricial: prevención de recaídas",
+    "C-2.10 — Asesoría nutricial: manejo de recompensas/contingencias",
+    "C-2.11 — Asesoría nutricial: otro (estrategias)",
+    "RC-1.1 — Reuniones de equipo",
+    "RC-1.2 — Referencia a otro nutriólogo con diferente experiencia",
+    "RC-1.3 — Colaboración con otros profesionales en nutrición",
+    "RC-1.4 — Colaboración con otros proveedores de salud",
+    "RC-1.5 — Referencia a otros proveedores",
+    "RC-1.6 — Referencia a agencias/programas comunitarios",
+    "RC-2.1 — Alta y transferencia a otro proveedor de salud",
+    "RC-2.2 — Alta y transferencia a agencias/programas comunitarios",
+    "RC-2.3 — Alta y transferencia a otro profesional de la nutrición",
+]
+ESTADOS_INTERVENCION = ["Activa", "Reformulada", "Suspendida", "Completada"]
+
+# Contenido del folleto "Consejos para una lactancia materna exitosa" (UNICEF
+# México, www.unicef.org/mexico). Cada elemento: (estilo, línea).
+LACTANCIA_MATERNA_CONTENIDO = [
+    ("titulo", "LACTANCIA MATERNA — Consejos para una lactancia materna exitosa"),
+    ("norm", "Documento de referencia: Consejos para una lactancia materna exitosa "
+             "(UNICEF México · #SíaLaLactancia · www.unicef.org/mexico)."),
+    ("seccion", "Extracción de la leche materna"),
+    ("norm", "1. Antes de extraer tu leche debes lavarte las manos."),
+    ("norm", "2. Date masaje en los pechos en forma de círculo, siguiendo las "
+             "manecillas del reloj y presionando ligeramente con los dedos."),
+    ("norm", "3. Frota los pechos presionando suavemente de atrás hacia adelante."),
+    ("norm", "4. Inclínate sacudiendo los pechos para que baje la leche."),
+    ("norm", "5. Exprime presionando los pechos sin lastimarte y deposita la leche "
+             "en un recipiente limpio."),
+    ("norm", "6. Repite los pasos 2 al 5 en cada pecho y, cuando el recipiente esté "
+             "lleno, tápalo."),
+    ("norm", "Después de extraer tu leche debes mantenerla refrigerada."),
+    ("seccion", "Conservación de la leche materna"),
+    ("bullet", "Colócale al recipiente una etiqueta con la fecha y hora de la extracción."),
+    ("bullet", "Guarda el recipiente en el refrigerador."),
+    ("bullet", "Cuando entibies la leche debe ser a baño María, no en el microondas ni "
+               "a fuego directo, porque perderá sus propiedades."),
+    ("bullet", "Para transportarla es necesario tener una hielera."),
+    ("norm", "La leche se puede guardar:"),
+    ("bullet", "4 a 8 horas a temperatura ambiente (16 a 26 grados)."),
+    ("bullet", "5 a 8 días en el refrigerador."),
+    ("bullet", "2 semanas en el cajón de congelación del refrigerador."),
+    ("bullet", "3 meses en un congelador independiente."),
+    ("seccion", "RECUERDA"),
+    ("bullet", "Antes de los 6 meses no debes darle a tu bebé ningún otro alimento que "
+               "no sea tu leche."),
+    ("bullet", "Después de los 6 meses se aconseja iniciar la alimentación con sólidos "
+               "y continuar con la lactancia materna hasta los dos años."),
+    ("norm", "La leche materna es el mejor alimento que un bebé puede recibir de forma "
+             "exclusiva durante los primeros seis meses de edad y, combinada con otros "
+             "alimentos, hasta los dos años o más."),
+    ("seccion", "¿Cómo amamantar a tu bebé?"),
+    ("norm", "Tú y tu bebé deben estar cómodos, tranquilos y relajados. Con la espalda "
+             "recta y los hombros relajados, debes acercar al bebé a tu pecho para "
+             "comenzar con la alimentación."),
+    ("norm", "Una posición incorrecta puede causar problemas como: dolor en los pezones, "
+             "rechazo a la alimentación e insuficiente producción de leche."),
+    ("bullet", "Asegúrate de tener un buen agarre al pecho: acércate a tu bebé y asegúrate "
+               "de que el pezón y la areola queden dentro de su boca. El mentón y la nariz "
+               "deben rozar el pecho pero sin limitar su respiración."),
+    ("bullet", "Siéntate y apoya la espalda. Sosteniendo el pecho con tus cuatro dedos por "
+               "abajo y el pulgar arriba, sobre la areola, toca con el pezón el labio "
+               "inferior de tu bebé hasta que abra la boca."),
+    ("bullet", "Amamantar en la noche es muy importante. Apóyate con comodidad sobre una "
+               "almohada y recuesta a tu bebé de lado de manera que su cabeza quede al "
+               "mismo nivel de tu pecho. Durante la toma, la cabeza de tu bebé debe estar "
+               "sobre una almohada doblada."),
+    ("bullet", "Tu leche también se puede extraer y guardar. Para sacarla, masajea tu pecho "
+               "y luego, con los dedos abiertos por encima de la areola, comprime hacia "
+               "atrás y después presiona la areola hacia el pezón."),
+    ("seccion", "Beneficios de la lactancia"),
+    ("sub", "Para el bebé:"),
+    ("bullet", "Es de fácil digestión, lo que disminuye los cólicos."),
+    ("bullet", "Disminuye el riesgo de enfermedades más comunes en la infancia como otitis "
+               "media aguda, dermatitis atópica, infecciones gastrointestinales, asma y "
+               "alergias, infecciones de las vías respiratorias, sobrepeso y obesidad."),
+    ("bullet", "Favorece el desarrollo emocional e intelectual."),
+    ("sub", "Para la madre:"),
+    ("bullet", "Disminuye el riesgo de hemorragia después del nacimiento del bebé."),
+    ("bullet", "Contribuye a evitar la depresión post-parto."),
+    ("bullet", "Mejora su colesterol y triglicéridos."),
+    ("bullet", "Previene a largo plazo la osteoporosis, el cáncer de mama y de ovario."),
+    ("norm", "La lactancia es la forma más natural y accesible de contribuir a la salud "
+             "y supervivencia de las niñas y los niños."),
+    ("norm", "Si tienes alguna duda o pregunta sobre cómo amamantar a tu bebé, acude al "
+             "centro de salud u hospital de tu confianza."),
+]
 RECUENTO_COMIDAS_ETIQUETAS = {c[0]: c[1] for c in RECUENTO_COMIDAS}
 RECUENTO_COMIDAS_VALORES = [c[1] for c in RECUENTO_COMIDAS]
 # Etiquetas de versiones anteriores, para no perder recuentos ya guardados.
@@ -396,9 +713,6 @@ EQUIV_GRUPOS_SMAE = [
 ]
 # Grupos de la tabla SMAE-5 que no entran al cuadro dietosintético.
 EQUIV_GRUPOS_EXCLUIDOS = {"Bebidad alcoholicas", "Bebidas alcoholicas"}
-# Edad mínima para usar la distribución de equivalentes: 16 semanas de vida
-# (112 días). Antes de esa edad la pestaña 9 no se habilita.
-EQUIV_EDAD_MINIMA_DIAS = 112
 # Reparto de la energía por tiempo de comida, en el orden de RECUENTO_COMIDAS.
 EQUIV_PORCENTAJE_COMIDAS = {
     "desayuno": 0.25,
@@ -3064,6 +3378,9 @@ class App(tk.Tk):
         self._tab_bioquimica()
         self._tab_ecuaciones()
         self._tab_distribucion_equivalentes()
+        self._tab_diagnostico_pes()
+        self._tab_intervencion_pan()
+        self._tab_lactancia_materna()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -5396,7 +5713,6 @@ class App(tk.Tk):
         else:
             semanas, resto = divmod(dias, 7)
             self.campos["edad"].set(f"{semanas} semanas y {resto} días")
-        self._actualizar_disponibilidad_calculo_equivalentes()
 
     def _clasificar(self):
         self._clasificar_peso_nacer(silencioso=False)
@@ -7369,29 +7685,6 @@ class App(tk.Tk):
             self._eq_composicion = cache
         return cache
 
-    def _actualizar_disponibilidad_calculo_equivalentes(self, *_args):
-        """Vuelve a dibujar el cálculo por día o, si el paciente no cumple la
-        edad, deja el bloque con el aviso de bloqueo."""
-        if not getattr(self, "eq_calc_celdas", None):
-            return
-        self._recalcular_calculo_equivalentes()
-
-    def _motivo_bloqueo_equivalentes(self):
-        """Aviso si la distribución de equivalentes todavía no corresponde
-        abrir; None cuando el paciente ya cumple la edad mínima."""
-        dias = self._parsedias_desde_nacimiento()
-        if dias is None:
-            return ("No se encontró la fecha de nacimiento del paciente.\n"
-                    "Cárguela en la pestaña Paciente para usar la "
-                    "distribución de equivalentes.")
-        if dias < EQUIV_EDAD_MINIMA_DIAS:
-            semanas, resto = divmod(dias, 7)
-            return (f"Edad no válida: la distribución de equivalentes se "
-                    f"habilita a partir de {EQUIV_EDAD_MINIMA_DIAS // 7} semanas "
-                    f"de vida (4 meses cumplidos).\n"
-                    f"Edad actual: {semanas} semanas y {resto} días.")
-        return None
-
     def _tab_distribucion_equivalentes(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="9. Distribución de equivalentes")
@@ -7399,9 +7692,12 @@ class App(tk.Tk):
         self.eq_vars = {}
         self.eq_total_fila = {}
         self.eq_total_comida = {}
+        self.eq_meta_fila = {}
+        self.eq_balance_fila = {}
         self._eq_composicion = None
         self.eq_dia = DIAS_SEMANA_CLAVES[0]
         self.eq_datos_dias = {clave: {} for clave in DIAS_SEMANA_CLAVES}
+        self.eq_dia_datos = {clave: {} for clave in DIAS_SEMANA_CLAVES}
         self.eq_grupos, composicion = grupos_equivalentes_smae5()
         atajo = {"colacion_matutina": "Col. matutina",
                  "colacion_vespertina": "Col. vespertina"}
@@ -7486,55 +7782,9 @@ class App(tk.Tk):
         self.nut_origen.grid(row=fila_total + 1, column=0, columnspan=5,
                              sticky="w", padx=8, pady=(0, 5))
 
-        # --- Cálculo de equivalentes: totales por día de la semana ---
-        marco_calc = ttk.LabelFrame(
-            interior,
-            text="Cálculo de equivalentes por día (tomado del cuadro de distribución)")
-        marco_calc.pack(fill="x", padx=10, pady=6)
-        columnas_calc = DIAS_SEMANA + [("semana", "Semana")]
-        ttk.Label(marco_calc, text="Aporte diario", font=negrita, width=26,
-                  anchor="w").grid(row=0, column=0, sticky="w", padx=6, pady=3)
-        for indice, (_clave, etiqueta) in enumerate(columnas_calc, start=1):
-            ttk.Label(marco_calc, text=etiqueta, font=negrita, width=13,
-                      anchor="center").grid(row=0, column=indice, padx=6, pady=3)
-        self.eq_calc_filas = [
-            ("eq", "Equivalentes", "{:g}"),
-            ("kcal", "kcal", "{:.0f}"),
-            ("prot", "Proteína (g)", "{:.1f}"),
-            ("hc", "Carbohidratos (g)", "{:.1f}"),
-            ("lip", "Grasas (g)", "{:.1f}"),
-            ("dif", "Diferencia con el objetivo (kcal)", "{:+.0f}"),
-        ]
-        self.eq_calc_celdas = {}
-        for fila, (clave, etiqueta, _formato) in enumerate(
-                self.eq_calc_filas, start=1):
-            fuente = {"font": negrita} if clave == "dif" else {}
-            ttk.Label(marco_calc, text=etiqueta, width=26, anchor="w",
-                      **fuente).grid(row=fila, column=0, sticky="w", padx=6, pady=1)
-            celdas = []
-            for columna in range(1, len(columnas_calc) + 1):
-                celda = ttk.Label(marco_calc, text="0", width=13, anchor="center",
-                                  **fuente)
-                celda.grid(row=fila, column=columna, padx=6, pady=1)
-                celdas.append(celda)
-            self.eq_calc_celdas[clave] = celdas
-        self.eq_calc_resumen = ttk.Label(marco_calc, text="", justify="left",
-                                         font=("TkDefaultFont", 9, "bold"))
-        self.eq_calc_resumen.grid(row=len(self.eq_calc_filas) + 1, column=0,
-                                  columnspan=len(columnas_calc) + 1, sticky="w",
-                                  padx=6, pady=(4, 2))
-        ttk.Label(
-            marco_calc,
-            text="Los números salen del cuadro de distribución: capture los "
-                 "equivalentes de cada tiempo de coma del día elegido y aquí se "
-                 "suman los 7 días para compararlos con el cuadro dietosintético.",
-            foreground="#555555", wraplength=980, justify="left").grid(
-            row=len(self.eq_calc_filas) + 2, column=0,
-            columnspan=len(columnas_calc) + 1, sticky="w", padx=6, pady=(0, 6))
-
-        # --- Selector del día de la semana ---
+        # --- Selector del día de la semana (equivalentes por día y distribución) ---
         marco_dia = ttk.Frame(interior)
-        marco_dia.pack(fill="x", padx=10, pady=(0, 4))
+        marco_dia.pack(fill="x", padx=10, pady=(4, 2))
         ttk.Label(marco_dia, text="Día de la semana:",
                   font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(4, 8))
         self.eq_dia_var = tk.StringVar(value=self.eq_dia)
@@ -7542,6 +7792,75 @@ class App(tk.Tk):
             ttk.Radiobutton(
                 marco_dia, text=etiqueta, value=clave, variable=self.eq_dia_var,
                 command=self._cambiar_dia_equivalentes).pack(side="left", padx=3)
+        ttk.Button(marco_dia, text="Aplicar equivalentes a todos los días",
+                   command=self._aplicar_equivalentes_dia_semana
+                   ).pack(side="right", padx=3)
+
+        # --- Equivalentes por día: alcanzar el cuadro dietosintético ---
+        marco_equiv = ttk.LabelFrame(
+            interior, text="Equivalentes por día (grupos de la tabla 2: Sistema "
+                           "Mexicano de Alimentos Equivalentes)")
+        marco_equiv.pack(fill="x", padx=10, pady=6)
+        titulos_equiv = ["Grupo de alimentos (tabla 2)", "Equivalentes", "kcal/eq",
+                         "kcal", "Proteína (g)", "Carbohidratos (g)", "Grasas (g)"]
+        for indice, titulo in enumerate(titulos_equiv):
+            ttk.Label(marco_equiv, text=titulo, font=negrita,
+                      width=26 if indice == 0 else 14,
+                      anchor="w" if indice == 0 else "center").grid(
+                row=0, column=indice, padx=6, pady=3)
+        self.eq_dia_vars = {}
+        self.eq_dia_celdas = {}
+        for fila, grupo in enumerate(self.eq_grupos, start=1):
+            ttk.Label(marco_equiv, text=grupo, width=26, anchor="w").grid(
+                row=fila, column=0, sticky="w", padx=6, pady=1)
+            var = tk.StringVar(value="")
+            entrada = ttk.Entry(marco_equiv, textvariable=var, width=14,
+                                justify="center")
+            entrada.grid(row=fila, column=1, padx=6, pady=1)
+            entrada.bind("<KeyRelease>",
+                         lambda e: self._recalcular_equivalentes_dia())
+            self.eq_dia_vars[grupo] = var
+            kcal_eq = composicion.get(grupo, {}).get("kcal", 0.0) or 0.0
+            ttk.Label(marco_equiv, text=f"{kcal_eq:.0f}", width=14,
+                      anchor="center", foreground="#555555").grid(
+                row=fila, column=2, padx=6, pady=1)
+            celdas = []
+            for columna in (3, 4, 5, 6):
+                celda = ttk.Label(marco_equiv, text="0", width=14, anchor="center")
+                celda.grid(row=fila, column=columna, padx=6, pady=1)
+                celdas.append(celda)
+            self.eq_dia_celdas[grupo] = celdas
+
+        fila_total_equiv = len(self.eq_grupos) + 1
+        ttk.Label(marco_equiv, text="TOTAL", width=26, anchor="w",
+                  font=negrita).grid(row=fila_total_equiv, column=0, sticky="w",
+                                     padx=6, pady=(4, 2))
+        self.eq_dia_total_eq = ttk.Label(marco_equiv, text="0", width=14,
+                                         anchor="center", font=negrita)
+        self.eq_dia_total_eq.grid(row=fila_total_equiv, column=1, padx=6,
+                                  pady=(4, 2))
+        ttk.Label(marco_equiv, text="—", width=14, anchor="center",
+                  font=negrita).grid(row=fila_total_equiv, column=2, padx=6,
+                                     pady=(4, 2))
+        self.eq_dia_total = []
+        for columna in (3, 4, 5, 6):
+            celda = ttk.Label(marco_equiv, text="0", width=14, anchor="center",
+                              font=negrita)
+            celda.grid(row=fila_total_equiv, column=columna, padx=6, pady=(4, 2))
+            self.eq_dia_total.append(celda)
+        self.eq_dia_resumen = ttk.Label(marco_equiv, text="", justify="left",
+                                        font=("TkDefaultFont", 9, "bold"))
+        self.eq_dia_resumen.grid(row=fila_total_equiv + 1, column=0,
+                                 columnspan=7, sticky="w", padx=6, pady=(4, 2))
+        ttk.Label(
+            marco_equiv,
+            text="Toma los valores del total de energía, proteína, grasas y "
+                 "carbohidratos del cuadro dietosintético: escriba los equivalentes "
+                 "de cada grupo de la tabla 2 hasta que las diferencias queden en "
+                 "cero. El aporte de cada equivalente es la mediana del grupo.",
+            foreground="#555555", wraplength=980, justify="left").grid(
+            row=fila_total_equiv + 2, column=0, columnspan=7, sticky="w",
+            padx=6, pady=(0, 6))
 
         # --- Distribución de equivalentes por tiempo de comida ---
         marco_cuadro = ttk.LabelFrame(
@@ -7556,6 +7875,10 @@ class App(tk.Tk):
                       width=13, anchor="center").grid(row=0, column=indice, padx=2, pady=3)
         ttk.Label(marco_cuadro, text="Total", width=10,
                   anchor="center").grid(row=0, column=len(RECUENTO_COMIDAS) + 1, padx=2, pady=3)
+        ttk.Label(marco_cuadro, text="Meta", width=10,
+                  anchor="center").grid(row=0, column=len(RECUENTO_COMIDAS) + 2, padx=2, pady=3)
+        ttk.Label(marco_cuadro, text="Falta / Sobra", width=14,
+                  anchor="center").grid(row=0, column=len(RECUENTO_COMIDAS) + 3, padx=2, pady=3)
 
         for fila, grupo in enumerate(self.eq_grupos, start=1):
             ttk.Label(marco_cuadro, text=grupo, width=26, anchor="w").grid(
@@ -7570,6 +7893,14 @@ class App(tk.Tk):
             etiqueta_total = ttk.Label(marco_cuadro, text="", width=10, anchor="center")
             etiqueta_total.grid(row=fila, column=len(RECUENTO_COMIDAS) + 1, padx=2)
             self.eq_total_fila[grupo] = etiqueta_total
+            etiqueta_meta = ttk.Label(marco_cuadro, text="", width=10, anchor="center",
+                                      foreground="#555555")
+            etiqueta_meta.grid(row=fila, column=len(RECUENTO_COMIDAS) + 2, padx=2)
+            self.eq_meta_fila[grupo] = etiqueta_meta
+            etiqueta_balance = ttk.Label(marco_cuadro, text="", width=14, anchor="center",
+                                         font=("TkDefaultFont", 9, "bold"))
+            etiqueta_balance.grid(row=fila, column=len(RECUENTO_COMIDAS) + 3, padx=2)
+            self.eq_balance_fila[grupo] = etiqueta_balance
 
         fila_total = len(self.eq_grupos) + 1
         ttk.Label(marco_cuadro, text="TOTAL DEL DÍA",
@@ -7619,8 +7950,821 @@ class App(tk.Tk):
             foreground="#555555", wraplength=980, justify="left").pack(fill="x", padx=14, pady=(0, 10))
 
         self._recalcular_equivalentes()
-        tab.bind("<Map>", self._actualizar_disponibilidad_calculo_equivalentes)
-        self._actualizar_disponibilidad_calculo_equivalentes()
+
+    def _tab_diagnostico_pes(self):
+        """Paso 2 del PAN: Diagnóstico nutricio en formato PESS."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="10. Diagnóstico nutricio (PES)")
+        self._tab_pes = tab
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=10, pady=(8, 0))
+        ttk.Label(barra, text="Paso 2 del PAN: Diagnóstico nutricio",
+                  font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(barra, text="(enunciado PESS)").pack(side="left", padx=6)
+        ttk.Button(barra, text="Imprimir PDF",
+                   command=self._imprimir_diagnostico_pes_pdf).pack(side="right")
+        ttk.Button(barra, text="Limpiar",
+                   command=self._limpiar_diagnostico_pes).pack(side="right", padx=6)
+        ttk.Button(barra, text="Guardar",
+                   command=self._guardar_diagnostico_pes).pack(side="right", padx=6)
+        ttk.Button(barra, text="Editar",
+                   command=self._editar_diagnostico_pes).pack(side="right")
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True, padx=10, pady=6)
+        canvas = tk.Canvas(contenedor, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        interior.bind("<Configure>",
+                      lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(ventana, width=e.width))
+        interior.columnconfigure(0, weight=1)
+
+        def _rueda(evento):
+            canvas.yview_scroll(-1 if evento.delta > 0 else 1, "units")
+
+        canvas.bind("<MouseWheel>", _rueda)
+        interior.bind("<MouseWheel>", _rueda)
+
+        self.pes_dominio = tk.StringVar(value=CATEGORIAS_DIAGNOSTICO[0])
+        self.pes_sin_dx = tk.BooleanVar(value=False)
+        self.pes_problema = tk.StringVar(value="")
+        self.pes_etiologia = tk.StringVar(value="")
+        self.pes_signos = tk.Text(interior, height=4, wrap="word")
+        self.pes_obs = tk.StringVar(value="")
+
+        marco_cat = ttk.LabelFrame(interior, text="Categoría (dominio) del diagnóstico")
+        marco_cat.pack(fill="x", pady=4)
+        for categoria in CATEGORIAS_DIAGNOSTICO:
+            ttk.Radiobutton(marco_cat, text=categoria, variable=self.pes_dominio,
+                            value=categoria, command=self._cambiar_dominio_pes
+                            ).pack(side="left", padx=8, pady=4)
+        ttk.Checkbutton(marco_cat,
+                        text="Sin diagnóstico nutricio en este momento (NO-1.1)",
+                        variable=self.pes_sin_dx,
+                        command=self._actualizar_habilitacion_pes
+                        ).pack(side="left", padx=16, pady=4)
+
+        marco_p = ttk.LabelFrame(interior, text="P — Denominación del problema (diagnóstico)")
+        marco_p.pack(fill="x", pady=4)
+        self.pes_problema_combo = ttk.Combobox(
+            marco_p, textvariable=self.pes_problema, width=72,
+            values=self._lista_diagnosticos(CATEGORIAS_DIAGNOSTICO[0]))
+        self.pes_problema_combo.pack(fill="x", padx=8, pady=(4, 0))
+        ttk.Label(marco_p, text="Seleccione de la lista o escriba un diagnóstico libre.",
+                  foreground="#555555").pack(anchor="w", padx=8, pady=(0, 4))
+
+        marco_e = ttk.LabelFrame(interior, text="E — Etiología  “relacionado con…”")
+        marco_e.pack(fill="x", pady=4)
+        ttk.Entry(marco_e, textvariable=self.pes_etiologia, width=72).pack(
+            fill="x", padx=8, pady=4)
+
+        marco_s = ttk.LabelFrame(interior, text="S — Signos / Síntomas  “evidenciado por…”")
+        marco_s.pack(fill="x", pady=4)
+        ttk.Label(marco_s, text="Marque los signos y síntomas identificados en la "
+                                "evaluación nutricia (Paso 1 del PAN); se integrarán "
+                                "después de “evidenciado por”.",
+                  foreground="#555555", wraplength=980, justify="left").pack(
+            anchor="w", padx=8, pady=(4, 2))
+        self.pes_signos_vars = {}
+        self.pes_signos_widgets = {}
+        for grupo, signos in SIGNOS_SINTOMAS_PES.items():
+            marco_grupo = ttk.LabelFrame(marco_s, text=grupo)
+            marco_grupo.pack(fill="x", padx=8, pady=3)
+            marco_grupo.columnconfigure(0, weight=1)
+            marco_grupo.columnconfigure(1, weight=1)
+            for indice, signo in enumerate(signos):
+                var = tk.BooleanVar(value=False)
+                check = ttk.Checkbutton(
+                    marco_grupo, text=signo, variable=var,
+                    command=self._actualizar_vista_pes)
+                check.grid(row=indice // 2, column=indice % 2, sticky="w",
+                           padx=6, pady=1)
+                self.pes_signos_vars[signo] = var
+                self.pes_signos_widgets[signo] = check
+        ttk.Label(marco_s, text="Otros signos/síntomas (texto libre):",
+                  foreground="#555555").pack(anchor="w", padx=8, pady=(6, 0))
+        self.pes_signos.pack(fill="x", padx=8, pady=4)
+
+        marco_v = ttk.LabelFrame(interior, text="Enunciado PESS completo")
+        marco_v.pack(fill="x", pady=4)
+        self.pes_vista = ttk.Label(marco_v, text="", justify="left", wraplength=980,
+                                   font=("TkDefaultFont", 10, "bold"))
+        self.pes_vista.pack(fill="x", padx=8, pady=6)
+
+        marco_o = ttk.LabelFrame(interior, text="Observaciones")
+        marco_o.pack(fill="x", pady=4)
+        obs_entry = ttk.Entry(marco_o, textvariable=self.pes_obs, width=72)
+        obs_entry.pack(fill="x", padx=8, pady=4)
+
+        marco_soap = ttk.LabelFrame(interior, text="Análisis SOAP (nota de evolución)")
+        marco_soap.pack(fill="x", pady=4)
+        ttk.Label(marco_soap, text="Formato de documentación clínica: Subjetivo, Objetivo, "
+                                   "Evaluación (Análisis) y Plan (Academy of Nutrition and "
+                                   "Dietetics – eatright). La buena nota documenta los datos de "
+                                   "la evaluación nutricia, el diagnóstico y el plan de "
+                                   "intervención.",
+                  foreground="#555555", wraplength=980, justify="left").pack(
+            anchor="w", padx=8, pady=(4, 2))
+
+        def _marco_soap_parte(codigo, titulo, alto):
+            parte = ttk.LabelFrame(marco_soap, text=f"{codigo} — {titulo}")
+            parte.pack(fill="x", padx=8, pady=3)
+            texto = tk.Text(parte, height=alto, wrap="word")
+            texto.pack(fill="x", padx=6, pady=4)
+            return texto
+
+        self.soap_s = _marco_soap_parte(
+            "S", "Subjetivo (lo que refiere el paciente o cuidador: síntomas, "
+                 "historia de alimentación, expectativas)", 3)
+        self.soap_o = _marco_soap_parte(
+            "O", "Objetivo (datos medibles de la evaluación: antropometría, "
+                 "laboratorios, ingesta, signos vitales)", 3)
+        marco_a = ttk.LabelFrame(marco_soap, text="A — Evaluación / Análisis")
+        marco_a.pack(fill="x", padx=8, pady=3)
+        ttk.Button(marco_a, text="Tomar el enunciado PESS →",
+                   command=self._tomar_pess_en_soap_a).pack(anchor="e", padx=6, pady=(4, 0))
+        self.soap_a = tk.Text(marco_a, height=3, wrap="word")
+        self.soap_a.pack(fill="x", padx=6, pady=4)
+        self.soap_p = _marco_soap_parte(
+            "P", "Plan (intervención nutricia: metas, prescripción, educación, "
+                 "monitoreo y seguimiento)", 3)
+
+        marco_adime = ttk.LabelFrame(interior, text="Análisis ADIME (Proceso de Atención Nutrimental)")
+        marco_adime.pack(fill="x", pady=4)
+        ttk.Label(marco_adime, text="Formato de documentación del Proceso de Atención "
+                                    "Nutrimental (Academy of Nutrition and Dietetics – "
+                                    "eatright): Evaluación (Assessment), Diagnóstico, "
+                                    "Intervención, Monitoreo y Evaluación de resultados.",
+                  foreground="#555555", wraplength=980, justify="left").pack(
+            anchor="w", padx=8, pady=(4, 2))
+
+        def _marco_adime_parte(codigo, titulo, alto):
+            parte = ttk.LabelFrame(marco_adime, text=f"{codigo} — {titulo}")
+            parte.pack(fill="x", padx=8, pady=3)
+            texto = tk.Text(parte, height=alto, wrap="word")
+            texto.pack(fill="x", padx=6, pady=4)
+            return texto
+
+        self.adime_a = _marco_adime_parte(
+            "A", "Assessment / Evaluación (datos de la valoración nutricia: "
+                 "antropometría, laboratorios, ingesta, historia clínica)", 3)
+        marco_d = ttk.LabelFrame(marco_adime, text="D — Diagnóstico nutricio")
+        marco_d.pack(fill="x", padx=8, pady=3)
+        ttk.Button(marco_d, text="Tomar el enunciado PESS →",
+                   command=self._tomar_pess_en_adime_d).pack(anchor="e", padx=6, pady=(4, 0))
+        self.adime_d = tk.Text(marco_d, height=3, wrap="word")
+        self.adime_d.pack(fill="x", padx=6, pady=4)
+        self.adime_i = _marco_adime_parte(
+            "I", "Intervención (qué se hará: prescripción, educación, coordinación)", 3)
+        self.adime_m = _marco_adime_parte(
+            "M", "Monitoreo (qué y cómo se medirá el progreso)", 3)
+        self.adime_e = _marco_adime_parte(
+            "E", "Evaluación (criterios y plazo para valorar la respuesta al "
+                 "tratamiento)", 3)
+
+        ttk.Label(
+            interior,
+            text="Preguntas de pensamiento crítico (PESS): ¿Puede el nutriólogo resolver "
+                 "o mejorar el diagnóstico? ¿La etiología es la causa primaria que su "
+                 "intervención puede atender? ¿Los signos/síntomas son específicos y medibles "
+                 "para monitorear la resolución o la mejoría? Los términos son de referencia "
+                 "(Academy of Nutrition and Dietetics, IDNT/eNCPT): verifique el código vigente "
+                 "de la edición que emplee.",
+            foreground="#555555", wraplength=980, justify="left").pack(fill="x", padx=8, pady=6)
+
+        self.pes_problema_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self._actualizar_vista_pes())
+        self.pes_problema_combo.bind(
+            "<KeyRelease>", lambda e: self._actualizar_vista_pes())
+        self.pes_etiologia.trace_add(
+            "write", lambda *a: self._actualizar_vista_pes())
+        self.pes_signos.bind(
+            "<KeyRelease>", lambda e: self._actualizar_vista_pes())
+        self._actualizar_habilitacion_pes()
+        self._actualizar_vista_pes()
+
+    def _lista_diagnosticos(self, dominio):
+        """Opciones del dominio (texto “código · denominación”)."""
+        return [f"{codigo} · {etiqueta}"
+                for codigo, etiqueta in DIAGNOSTICOS_NUTRICIOS.get(dominio, [])]
+
+    def _cambiar_dominio_pes(self):
+        self.pes_problema_combo.config(values=self._lista_diagnosticos(self.pes_dominio.get()))
+        self._actualizar_vista_pes()
+
+    def _actualizar_habilitacion_pes(self):
+        estado = "disabled" if self.pes_sin_dx.get() else "normal"
+        self.pes_problema_combo.config(state=estado)
+        self.pes_signos.config(state=estado)
+        for check in self.pes_signos_widgets.values():
+            check.config(state=estado)
+        self._actualizar_vista_pes()
+
+    def _lista_signos_pess(self):
+        """Signos y síntomas capturados (lista marcada + texto libre)."""
+        partes = [signo for signo, var in self.pes_signos_vars.items()
+                  if var.get()]
+        libre = self.pes_signos.get("1.0", "end").strip()
+        if libre:
+            partes.append(libre)
+        return "; ".join(partes)
+
+    def _generar_pess(self):
+        if self.pes_sin_dx.get():
+            base = "Sin diagnóstico nutricio en este momento (NO-1.1)."
+            nota = self.pes_etiologia.get().strip()
+            if nota:
+                base += " " + nota
+            return base
+        problema = self.pes_problema.get().strip()
+        etiologia = self.pes_etiologia.get().strip()
+        signos = self._lista_signos_pess()
+        if not problema:
+            return "Seleccione o escriba el diagnóstico nutricio (P)."
+        texto = problema
+        if etiologia:
+            texto += " relacionado con " + etiologia
+        if signos:
+            texto += " evidenciado por " + signos
+        else:
+            texto += " evidenciado por (sin signos/síntomas capturados)"
+        return texto
+
+    def _actualizar_vista_pes(self):
+        if not getattr(self, "pes_vista", None):
+            return
+        self.pes_vista.config(text=self._generar_pess())
+
+    def _tomar_pess_en_soap_a(self):
+        texto = self._generar_pess()
+        if texto:
+            self.soap_a.delete("1.0", "end")
+            self.soap_a.insert("1.0", texto)
+
+    def _tomar_pess_en_adime_d(self):
+        texto = self._generar_pess()
+        if texto:
+            self.adime_d.delete("1.0", "end")
+            self.adime_d.insert("1.0", texto)
+
+    def _conjunto_datos_pes(self):
+        return {
+            "dominio": self.pes_dominio.get(),
+            "sin_diagnostico": bool(self.pes_sin_dx.get()),
+            "problema": self.pes_problema.get().strip(),
+            "etiologia": self.pes_etiologia.get().strip(),
+            "signos": self.pes_signos.get("1.0", "end").strip(),
+            "signos_lista": [signo for signo, var in self.pes_signos_vars.items()
+                             if var.get()],
+            "observaciones": self.pes_obs.get().strip(),
+            "soap_s": self.soap_s.get("1.0", "end").strip(),
+            "soap_o": self.soap_o.get("1.0", "end").strip(),
+            "soap_a": self.soap_a.get("1.0", "end").strip(),
+            "soap_p": self.soap_p.get("1.0", "end").strip(),
+            "adime_a": self.adime_a.get("1.0", "end").strip(),
+            "adime_d": self.adime_d.get("1.0", "end").strip(),
+            "adime_i": self.adime_i.get("1.0", "end").strip(),
+            "adime_m": self.adime_m.get("1.0", "end").strip(),
+            "adime_e": self.adime_e.get("1.0", "end").strip(),
+        }
+
+    def _crear_tabla_diagnostico_pes(self, cur):
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS diagnostico_pes (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   datos_json TEXT,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')))""")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_diag_pes_paciente "
+            "ON diagnostico_pes(paciente_id)")
+
+    def _guardar_diagnostico_pes(self):
+        if not self._exigir_paciente():
+            return
+        datos = self._conjunto_datos_pes()
+        if not datos["sin_diagnostico"] and not datos["problema"]:
+            messagebox.showwarning(
+                "Guardar", "Seleccione o escriba el diagnóstico nutricio (P)")
+            return
+        if not any([datos["sin_diagnostico"], datos["problema"], datos["etiologia"],
+                    datos["signos"], datos["signos_lista"], datos["observaciones"],
+                    datos["soap_s"], datos["soap_o"], datos["soap_a"], datos["soap_p"],
+                    datos["adime_a"], datos["adime_d"], datos["adime_i"],
+                    datos["adime_m"], datos["adime_e"]]):
+            messagebox.showwarning(
+                "Guardar", "No ha capturado ningún dato del diagnóstico nutricio")
+            return
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            self._crear_tabla_diagnostico_pes(cur)
+            existente = cur.execute(
+                "SELECT id FROM diagnostico_pes WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1", (self._paciente_id,)).fetchone()
+            texto = json.dumps(datos, ensure_ascii=False)
+            if existente:
+                cur.execute(
+                    """UPDATE diagnostico_pes
+                       SET datos_json = ?, fecha_registro = datetime('now','localtime')
+                       WHERE id = ?""", (texto, existente[0]))
+            else:
+                cur.execute(
+                    """INSERT INTO diagnostico_pes (paciente_id, datos_json)
+                       VALUES (?,?)""", (self._paciente_id, texto))
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Diagnóstico nutricio guardado | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Diagnóstico nutricio guardado")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_diagnostico_pes(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                "SELECT datos_json FROM diagnostico_pes "
+                "WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            fila = None
+        conn.close()
+        if fila is None:
+            self._limpiar_diagnostico_pes(avisar=False)
+            if not silencioso:
+                messagebox.showinfo(
+                    "Editar", "No hay diagnóstico nutricio guardado para este paciente")
+            return
+        try:
+            datos = json.loads(fila[0] or "{}")
+        except (TypeError, ValueError):
+            datos = {}
+        self._fijar_diagnostico_pes(datos)
+        self.status.config(
+            text=f"Editando diagnóstico nutricio | Paciente N° {self._paciente_id}")
+
+    def _fijar_diagnostico_pes(self, datos):
+        datos = datos or {}
+        self.pes_problema_combo.config(state="normal")
+        self.pes_signos.config(state="normal")
+        for check in self.pes_signos_widgets.values():
+            check.config(state="normal")
+        dominio = datos.get("dominio")
+        if dominio not in CATEGORIAS_DIAGNOSTICO:
+            dominio = CATEGORIAS_DIAGNOSTICO[0]
+        self.pes_dominio.set(dominio)
+        self._cambiar_dominio_pes()
+        self.pes_sin_dx.set(bool(datos.get("sin_diagnostico")))
+        lista = set(datos.get("signos_lista") or [])
+        for signo, var in self.pes_signos_vars.items():
+            var.set(signo in lista)
+        self.pes_problema.set(datos.get("problema") or "")
+        self.pes_etiologia.set(datos.get("etiologia") or "")
+        self.pes_signos.delete("1.0", "end")
+        self.pes_signos.insert("1.0", datos.get("signos") or "")
+        self.pes_obs.set(datos.get("observaciones") or "")
+        for clave, texto in (("soap_s", self.soap_s), ("soap_o", self.soap_o),
+                             ("soap_a", self.soap_a), ("soap_p", self.soap_p),
+                             ("adime_a", self.adime_a), ("adime_d", self.adime_d),
+                             ("adime_i", self.adime_i), ("adime_m", self.adime_m),
+                             ("adime_e", self.adime_e)):
+            texto.delete("1.0", "end")
+            texto.insert("1.0", datos.get(clave) or "")
+        self._actualizar_habilitacion_pes()
+        self._actualizar_vista_pes()
+
+    def _limpiar_diagnostico_pes(self, avisar=True):
+        self.pes_problema_combo.config(state="normal")
+        self.pes_signos.config(state="normal")
+        for check in self.pes_signos_widgets.values():
+            check.config(state="normal")
+        self.pes_dominio.set(CATEGORIAS_DIAGNOSTICO[0])
+        self._cambiar_dominio_pes()
+        self.pes_sin_dx.set(False)
+        self.pes_problema.set("")
+        self.pes_etiologia.set("")
+        for var in self.pes_signos_vars.values():
+            var.set(False)
+        self.pes_signos.delete("1.0", "end")
+        self.pes_obs.set("")
+        for texto in (self.soap_s, self.soap_o, self.soap_a, self.soap_p,
+                      self.adime_a, self.adime_d, self.adime_i, self.adime_m,
+                      self.adime_e):
+            texto.delete("1.0", "end")
+        self._actualizar_habilitacion_pes()
+        self._actualizar_vista_pes()
+        if avisar:
+            self.status.config(text="Diagnóstico nutricio reiniciado")
+
+    def _imprimir_diagnostico_pes_pdf(self):
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.units import cm
+            import os
+            from datetime import datetime
+            if not getattr(self, "_paciente_id", None):
+                if not self._exigir_paciente():
+                    return
+            conn = conectar()
+            fila_p = conn.execute(
+                "SELECT nombre, dni_hc, fecha_nacimiento, sexo FROM paciente WHERE id = ?",
+                (self._paciente_id,)).fetchone()
+            conn.close()
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            ruta = filedialog.asksaveasfilename(
+                parent=self, title="Guardar Diagnóstico nutricio en PDF",
+                initialfile="diagnostico_nutricio_" + ts + ".pdf",
+                defaultextension=".pdf", filetypes=[("Archivo PDF", "*.pdf")])
+            if not ruta:
+                return
+            doc = SimpleDocTemplate(
+                ruta, pagesize=A4, rightMargin=2 * cm, leftMargin=2 * cm,
+                topMargin=2 * cm, bottomMargin=2 * cm)
+            styles = getSampleStyleSheet()
+            elements = []
+            elements.append(Paragraph("DIAGNÓSTICO NUTRICIO — PASO 2 DEL PAN (PESS)",
+                                      styles["Title"]))
+            elements.append(Spacer(1, 0.3 * cm))
+            datos_paciente = []
+            if fila_p:
+                if fila_p[0]:
+                    datos_paciente.append(["Paciente:", fila_p[0]])
+                if fila_p[1]:
+                    datos_paciente.append(["DNI/HC:", fila_p[1]])
+                if fila_p[2]:
+                    datos_paciente.append(["Fecha de nacimiento:", fila_p[2] or ""])
+                if fila_p[3]:
+                    datos_paciente.append(["Sexo:", fila_p[3]])
+            datos_paciente.append(["Fecha/Hora de generación:", fecha_hora])
+            tabla_p = Table(datos_paciente, colWidths=[4 * cm, 11 * cm])
+            tabla_p.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+            elements.append(tabla_p)
+            elements.append(Spacer(1, 0.5 * cm))
+            datos = self._conjunto_datos_pes()
+            filas = []
+            if datos["sin_diagnostico"]:
+                filas.append(["P — Problema:",
+                              "Sin diagnóstico nutricio en este momento (NO-1.1)"])
+            else:
+                filas.append(["P — Problema:", datos["problema"] or "-"])
+                filas.append(["Categoría (dominio):", datos["dominio"]])
+                filas.append(["E — Etiología:", datos["etiologia"] or "-"])
+                signos_txt = "; ".join(datos["signos_lista"]) if datos["signos_lista"] else ""
+                if datos["signos"]:
+                    signos_txt = (signos_txt + "; " if signos_txt else "") + datos["signos"]
+                filas.append(["S — Signos/Síntomas:", signos_txt or "-"])
+            filas.append(["Observaciones:", datos["observaciones"] or "-"])
+            tabla_d = Table(filas, colWidths=[4.5 * cm, 10.5 * cm])
+            tabla_d.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+            elements.append(tabla_d)
+            elements.append(Spacer(1, 0.5 * cm))
+            elements.append(Paragraph("Enunciado PESS completo", styles["Heading2"]))
+            elementos_pess = [
+                [Paragraph(self._generar_pess().replace("\n", "<br/>"), styles["Normal"])]]
+            tabla_pess = Table(elementos_pess, colWidths=[15 * cm])
+            tabla_pess.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.75, colors.black),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+            elements.append(tabla_pess)
+            elements.append(Spacer(1, 0.5 * cm))
+
+            def _seccion_nota(titulo, filas, anchos):
+                if not any(contenido for _, contenido in filas):
+                    return
+                elements.append(Paragraph(titulo, styles["Heading2"]))
+                tabla = Table([fila for fila in filas if fila[1]],
+                              colWidths=list(anchos))
+                tabla.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+                elements.append(tabla)
+                elements.append(Spacer(1, 0.4 * cm))
+
+            _seccion_nota("Nota SOAP (nota de evolución)",
+                          [["S — Subjetivo:", datos["soap_s"]],
+                           ["O — Objetivo:", datos["soap_o"]],
+                           ["A — Evaluación/Análisis:", datos["soap_a"]],
+                           ["P — Plan:", datos["soap_p"]]],
+                          (4.5 * cm, 10.5 * cm))
+            _seccion_nota("Nota ADIME (Proceso de Atención Nutrimental)",
+                          [["A — Assessment:", datos["adime_a"]],
+                           ["D — Diagnóstico:", datos["adime_d"]],
+                           ["I — Intervención:", datos["adime_i"]],
+                           ["M — Monitoreo:", datos["adime_m"]],
+                           ["E — Evaluación:", datos["adime_e"]]],
+                          (4.5 * cm, 10.5 * cm))
+            elements.append(Spacer(1, 0.3 * cm))
+            elements.append(Paragraph(
+                "<i>Terminología de referencia: Academy of Nutrition and Dietetics "
+                "(IDNT/eNCPT). Verifique el código vigente de la edición que emplee.</i>",
+                styles["Normal"]))
+            doc.build(elements)
+            if os.name == "nt" and hasattr(os, "startfile"):
+                os.startfile(ruta)
+            self.status.config(text=f"Diagnóstico nutricio exportado a PDF: {ruta}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _crear_tabla_intervencion_nutricional(self, cur):
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS intervencion_nutricional (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   items_json TEXT,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')))""")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interv_pan_paciente "
+            "ON intervencion_nutricional(paciente_id)")
+
+    def _tab_intervencion_pan(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="11. Intervención nutricional (PAN)")
+        interior = ttk.Frame(tab)
+        interior.pack(fill="both", expand=True, padx=10, pady=10)
+
+        ttk.Label(interior, text="PASO 3 DEL PAN — Intervención nutricional",
+                  font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
+
+        marco_form = ttk.LabelFrame(
+            interior, text="Intervención (elija o escriba el término del "
+                           "Manual de terminología en nutrición)")
+        marco_form.pack(fill="x", pady=4)
+        self.pan_int_var = tk.StringVar()
+        self.pan_det_var = tk.StringVar()
+        self.pan_frec_var = tk.StringVar()
+        self.pan_estado_var = tk.StringVar(value="Activa")
+        ttk.Label(marco_form, text="Intervención:").grid(
+            row=0, column=0, sticky="w", padx=(8, 4), pady=(6, 2))
+        ttk.Combobox(marco_form, textvariable=self.pan_int_var,
+                     values=INTERVENCIONES_PAN, width=72).grid(
+            row=0, column=1, columnspan=3, sticky="we", padx=(0, 8), pady=(6, 2))
+        ttk.Label(marco_form, text="Detalle / estrategia:").grid(
+            row=1, column=0, sticky="w", padx=(8, 4), pady=2)
+        ttk.Entry(marco_form, textvariable=self.pan_det_var, width=72).grid(
+            row=1, column=1, columnspan=3, sticky="we", padx=(0, 8), pady=2)
+        ttk.Label(marco_form, text="Frecuencia / duración:").grid(
+            row=2, column=0, sticky="w", padx=(8, 4), pady=2)
+        ttk.Entry(marco_form, textvariable=self.pan_frec_var, width=40).grid(
+            row=2, column=1, sticky="we", padx=(0, 8), pady=2)
+        ttk.Label(marco_form, text="Estado:").grid(
+            row=2, column=2, sticky="w", padx=(0, 4), pady=2)
+        ttk.Combobox(marco_form, textvariable=self.pan_estado_var,
+                     values=ESTADOS_INTERVENCION, state="readonly", width=16).grid(
+            row=2, column=3, sticky="w", padx=(0, 8), pady=2)
+        botones_form = ttk.Frame(marco_form)
+        botones_form.grid(row=3, column=0, columnspan=4, sticky="w", padx=8, pady=(4, 8))
+        ttk.Button(botones_form, text="Añadir / Actualizar",
+                   command=self._anadir_actualizar_intervencion).pack(side="left", padx=4)
+        ttk.Button(botones_form, text="Limpiar formulario",
+                   command=self._limpiar_form_intervencion).pack(side="left", padx=4)
+        marco_form.columnconfigure(1, weight=1)
+
+        marco_lista = ttk.LabelFrame(
+            interior, text="Lista de intervenciones (estrategias y acciones de la atención)")
+        marco_lista.pack(fill="both", expand=True, pady=4)
+
+        columnas = ("intervencion", "detalle", "frecuencia", "estado")
+        titulos = ["Intervención (terminología)", "Detalle / estrategia", "Frecuencia / duración", "Estado"]
+        anchos = [330, 330, 160, 110]
+        self.pan_tree = ttk.Treeview(marco_lista, columns=columnas, show="headings",
+                                     height=8)
+        for columna, titulo, ancho in zip(columnas, titulos, anchos):
+            self.pan_tree.heading(columna, text=titulo)
+            self.pan_tree.column(columna, width=ancho,
+                                 anchor="w" if columna != "estado" else "center")
+        self.pan_tree.pack(side="left", fill="both", expand=True, padx=(8, 2), pady=8)
+        tsb = ttk.Scrollbar(marco_lista, orient="vertical", command=self.pan_tree.yview)
+        self.pan_tree.configure(yscrollcommand=tsb.set)
+        tsb.pack(side="left", fill="y", pady=8)
+        self.pan_tree.bind("<<TreeviewSelect>>", self._cargar_intervencion_en_formulario)
+
+        barra = ttk.Frame(interior)
+        barra.pack(fill="x", pady=6)
+        for texto, comando in (
+                ("Eliminar", self._eliminar_intervencion),
+                ("Guardar", self._guardar_intervencion_pan),
+                ("Editar guardado", lambda: self._cargar_intervencion_pan(silencioso=False)),
+                ("Limpiar", self._limpiar_intervencion_pan)):
+            ttk.Button(barra, text=texto, command=comando).pack(side="left", padx=4)
+
+        ttk.Label(
+            interior,
+            text="Paso 3 del Proceso de Atención Nutrimental: la intervención se diseña a "
+                 "partir del diagnóstico PESS para resolver o controlar el problema. "
+                 "La lista desplegable usa los términos del Manual de terminología en "
+                 "nutrición (Academy of Nutrition and Dietetics, eNCPT/IDNT): dominios ND "
+                 "(administración de alimentos y/o nutrimentos), E (educación nutricia), C "
+                 "(asesoría nutricia) y RC (coordinación de la atención nutricia), con sus "
+                 "códigos TIND. Verifique los códigos vigentes de la edición que emplee.",
+            foreground="#555555", wraplength=980, justify="left").pack(fill="x", pady=(0, 6))
+
+    def _limpiar_form_intervencion(self):
+        self.pan_int_var.set("")
+        self.pan_det_var.set("")
+        self.pan_frec_var.set("")
+        self.pan_estado_var.set("Activa")
+        for item in self.pan_tree.selection():
+            self.pan_tree.selection_remove(item)
+
+    def _anadir_actualizar_intervencion(self):
+        termino = self.pan_int_var.get().strip()
+        if not termino:
+            messagebox.showwarning("Intervención", "Escriba o elija la intervención")
+            return
+        valores = (termino, self.pan_det_var.get().strip(),
+                   self.pan_frec_var.get().strip(), self.pan_estado_var.get())
+        sel = self.pan_tree.selection()
+        if sel:
+            self.pan_tree.item(sel[0], values=valores)
+        else:
+            self.pan_tree.insert("", "end", values=valores)
+        self._limpiar_form_intervencion()
+
+    def _cargar_intervencion_en_formulario(self, _event=None):
+        sel = self.pan_tree.selection()
+        if not sel:
+            return
+        termino, detalle, frecuencia, estado = self.pan_tree.item(sel[0], "values")
+        self.pan_int_var.set(termino)
+        self.pan_det_var.set(detalle)
+        self.pan_frec_var.set(frecuencia)
+        self.pan_estado_var.set(estado if estado in ESTADOS_INTERVENCION else "Activa")
+
+    def _eliminar_intervencion(self):
+        sel = self.pan_tree.selection()
+        if not sel:
+            messagebox.showinfo("Intervención",
+                                "Seleccione una intervención para eliminarla")
+            return
+        for item in sel:
+            self.pan_tree.delete(item)
+        self._limpiar_form_intervencion()
+
+    def _conjunto_datos_intervencion(self):
+        items = []
+        for item in self.pan_tree.get_children():
+            inter, detalle, frecuencia, estado = self.pan_tree.item(item, "values")
+            items.append({"intervencion": inter, "detalle": detalle,
+                          "frecuencia": frecuencia, "estado": estado})
+        return {"items": items}
+
+    def _guardar_intervencion_pan(self):
+        if not self._exigir_paciente():
+            return
+        datos = self._conjunto_datos_intervencion()
+        if not datos["items"]:
+            messagebox.showwarning(
+                "Guardar", "No ha capturado ninguna intervención")
+            return
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            self._crear_tabla_intervencion_nutricional(cur)
+            existente = cur.execute(
+                "SELECT id FROM intervencion_nutricional WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1", (self._paciente_id,)).fetchone()
+            texto = json.dumps(datos, ensure_ascii=False)
+            if existente:
+                cur.execute(
+                    """UPDATE intervencion_nutricional
+                       SET items_json = ?,
+                           fecha_registro = datetime('now','localtime')
+                       WHERE id = ?""",
+                    (texto, existente[0]))
+            else:
+                cur.execute(
+                    """INSERT INTO intervencion_nutricional (paciente_id, items_json)
+                       VALUES (?,?)""",
+                    (self._paciente_id, texto))
+            conn.commit()
+            conn.close()
+            self.status.config(
+                text=f"Intervención nutricional guardada | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Intervención nutricional guardada")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _cargar_intervencion_pan(self, silencioso=False):
+        if silencioso and not getattr(self, "_paciente_id", None):
+            return
+        if not self._exigir_paciente():
+            return
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                "SELECT items_json FROM intervencion_nutricional "
+                "WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+        except sqlite3.Error:
+            fila = None
+        conn.close()
+        if fila is None:
+            self._limpiar_intervencion_pan(avisar=False)
+            if not silencioso:
+                messagebox.showinfo(
+                    "Editar", "No hay intervención guardada para este paciente")
+            return
+        try:
+            items = json.loads(fila[0] or "[]")
+        except (TypeError, ValueError):
+            items = []
+        self._limpiar_intervencion_pan(avisar=False)
+        for it in items:
+            self.pan_tree.insert("", "end", values=(
+                it.get("intervencion") or "", it.get("detalle") or "",
+                it.get("frecuencia") or "", it.get("estado") or "Activa"))
+        self.status.config(
+            text=f"Editando intervención nutricional | Paciente N° {self._paciente_id}")
+
+    def _limpiar_intervencion_pan(self, avisar=True):
+        for item in self.pan_tree.get_children():
+            self.pan_tree.delete(item)
+        self._limpiar_form_intervencion()
+        if avisar:
+            self.status.config(text="Intervención nutricional reiniciada")
+
+    def _tab_lactancia_materna(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="12. Lactancia materna")
+        interior = ttk.Frame(tab)
+        interior.pack(fill="both", expand=True, padx=10, pady=10)
+
+        barra_sup = ttk.Frame(interior)
+        barra_sup.pack(fill="x", pady=(0, 4))
+        ttk.Label(barra_sup, text="Imprimir el documento:",
+                  font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(0, 6))
+        ttk.Button(barra_sup, text="Imprimir PDF",
+                   command=self._imprimir_pdf_lactancia).pack(side="left")
+
+        marco = ttk.LabelFrame(
+            interior, text="Consejos para una lactancia materna exitosa "
+                           "(documento de UNICEF México)")
+        marco.pack(fill="x")
+
+        self.lac_text = tk.Text(marco, wrap="word", padx=12, pady=10, height=16,
+                                font=("TkDefaultFont", 10))
+        tsb = ttk.Scrollbar(marco, orient="vertical", command=self.lac_text.yview)
+        self.lac_text.configure(yscrollcommand=tsb.set)
+        self.lac_text.pack(side="left", fill="both", expand=True)
+        tsb.pack(side="right", fill="y")
+
+        self.lac_text.tag_configure("titulo", font=("TkDefaultFont", 13, "bold"),
+                                    foreground="#1E6E5C")
+        self.lac_text.tag_configure("seccion", font=("TkDefaultFont", 11, "bold"),
+                                    foreground="#004080", spacing1=8)
+        self.lac_text.tag_configure("sub", font=("TkDefaultFont", 10, "bold"),
+                                    spacing1=4)
+        self.lac_text.tag_configure("bullet", lmargin1=18, lmargin2=18)
+        self.lac_text.tag_configure("norm", lmargin2=2)
+        for estilo, linea in LACTANCIA_MATERNA_CONTENIDO:
+            self.lac_text.insert("end", linea + "\n", estilo)
+        self.lac_text.configure(state="disabled")
+
+    def _imprimir_pdf_lactancia(self):
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        ruta = os.path.join(raiz, "Consejos para una lactancia materna exitosa.pdf")
+        if not os.path.exists(ruta):
+            messagebox.showerror(
+                "Imprimir PDF",
+                "No se encontró el documento:\nConsejos para una lactancia materna exitosa.pdf")
+            return
+        try:
+            os.startfile(ruta)
+            messagebox.showinfo(
+                "Imprimir PDF",
+                "Se abrió el documento \"Consejos para una lactancia materna exitosa.pdf\".\n"
+                "En el visor, pulse Imprimir (Ctrl + P) y elija la impresora en el cuadro "
+                "de diálogo.")
+            self.status.config(text="Documento abierto para imprimir | Lactancia materna")
+        except Exception as e:
+            messagebox.showerror("Imprimir PDF", str(e))
 
     def _equivalentes_celda(self, grupo, comida):
         var = self.eq_vars.get((grupo, comida))
@@ -7687,6 +8831,7 @@ class App(tk.Tk):
             self.eq_total_comida[clave].config(
                 text=self._formato_equivalentes(totales_comida[clave]))
         self.eq_total_dia.config(text=self._formato_equivalentes(acumulado["eq"]))
+        self._actualizar_balance_equivalentes()
         self._escribir_resumen_equivalentes(acumulado)
         self._recalcular_macronutrientes()
 
@@ -7713,16 +8858,158 @@ class App(tk.Tk):
                      + DIAS_SEMANA_ETIQUETAS.get(clave_dia, clave_dia))
 
     def _cambiar_dia_equivalentes(self):
-        """Guarda el día que se estaba capturando y abre el elegido."""
+        """Guarda el día que se estaba capturando (equivalentes por día y
+        distribución) y abre el día elegido."""
         if not getattr(self, "eq_vars", None):
             return
         nuevo = self.eq_dia_var.get()
         if nuevo not in DIAS_SEMANA_CLAVES:
             nuevo = DIAS_SEMANA_CLAVES[0]
         self.eq_datos_dias[self.eq_dia] = self._filas_distribucion_equivalentes()
+        self.eq_dia_datos[self.eq_dia] = self._filas_equivalentes_dia()
         self.eq_dia = nuevo
         self._cargar_dia_en_cuadro(nuevo)
+        self._cargar_equivalentes_dia_en_tabla(nuevo)
         self._recalcular_equivalentes()
+        self._recalcular_equivalentes_dia()
+
+    def _cargar_equivalentes_dia_en_tabla(self, clave_dia):
+        """Vuelca al cuadro de equivalentes por día los equivalentes del día."""
+        if not getattr(self, "eq_dia_vars", None):
+            return
+        datos = self.eq_dia_datos.get(clave_dia) or {}
+        for grupo, var in self.eq_dia_vars.items():
+            texto = datos.get(grupo)
+            var.set("" if not texto else str(texto))
+
+    def _semana_equivalentes_dia(self):
+        """Equivalentes por día de los 7 días, guardando el día en pantalla."""
+        semana = dict(self.eq_dia_datos)
+        semana[self.eq_dia] = self._filas_equivalentes_dia()
+        return {clave: semana.get(clave) or {} for clave in DIAS_SEMANA_CLAVES}
+
+    def _aplicar_equivalentes_dia_semana(self):
+        """Copia los equivalentes por día del día en pantalla a los 7 días."""
+        if not getattr(self, "eq_dia_vars", None):
+            return
+        if not messagebox.askyesno(
+                "Aplicar a la semana",
+                "Se copiarán los equivalentes por día del día en pantalla a los "
+                "7 días de la semana.\n¿Continuar?"):
+            return
+        actual = self._filas_equivalentes_dia()
+        for clave in DIAS_SEMANA_CLAVES:
+            self.eq_dia_datos[clave] = dict(actual)
+        self._recalcular_equivalentes_dia()
+        self.status.config(text="Equivalentes por día copiados a toda la semana")
+
+    def _equivalentes_dia_valor(self, grupo):
+        """Equivalentes del día escritos para el grupo (admite coma decimal)."""
+        var = self.eq_dia_vars.get(grupo)
+        if var is None:
+            return 0.0
+        try:
+            valor = float(str(var.get()).replace(",", ".").strip() or 0)
+        except ValueError:
+            return 0.0
+        return valor if valor > 0 else 0.0
+
+    def _filas_equivalentes_dia(self):
+        """Equivalentes del día escritos, un texto por grupo de la tabla 2."""
+        if not getattr(self, "eq_dia_vars", None):
+            return {}
+        return {grupo: var.get().strip() for grupo, var in self.eq_dia_vars.items()}
+
+    def _fijar_equivalentes_dia(self, calculo):
+        """Vuelca los equivalentes por día guardados (hoy por día; en versiones
+        anteriores un solo cuadro que se repite en los 7 días)."""
+        self.eq_dia_datos = {
+            clave: valores for clave, valores
+            in self._semana_desde_filas(calculo or {}).items()}
+        for clave in DIAS_SEMANA_CLAVES:
+            self.eq_dia_datos.setdefault(clave, {})
+        self._cargar_equivalentes_dia_en_tabla(self.eq_dia)
+        self._recalcular_equivalentes_dia()
+
+    def _recalcular_equivalentes_dia(self):
+        """Suma el aporte de los equivalentes del día escritos renglón por
+        renglón y compara el total con el cuadro dietosintético."""
+        if not getattr(self, "eq_dia_vars", None):
+            return
+        self.eq_dia_datos[self.eq_dia] = self._filas_equivalentes_dia()
+        composicion = self._composicion_equivalentes()
+        totales = {"eq": 0.0, "kcal": 0.0, "prot": 0.0, "hc": 0.0, "lip": 0.0}
+        for grupo in self.eq_grupos:
+            equivalentes = self._equivalentes_dia_valor(grupo)
+            datos = composicion.get(grupo, {})
+            valores = (equivalentes * (datos.get("kcal") or 0.0),
+                       equivalentes * (datos.get("proteinas_g") or 0.0),
+                       equivalentes * (datos.get("hidratos_carbono_g") or 0.0),
+                       equivalentes * (datos.get("lipidos_g") or 0.0))
+            for celda, valor in zip(self.eq_dia_celdas[grupo], valores):
+                celda.config(text=f"{valor:.1f}")
+            totales["eq"] += equivalentes
+            totales["kcal"] += valores[0]
+            totales["prot"] += valores[1]
+            totales["hc"] += valores[2]
+            totales["lip"] += valores[3]
+        self.eq_dia_total_eq.config(text=f"{totales['eq']:g}")
+        for celda, clave in zip(self.eq_dia_total, ("kcal", "prot", "hc", "lip")):
+            celda.config(text=f"{totales[clave]:.0f}" if clave == "kcal"
+                         else f"{totales[clave]:.1f}")
+        self._escribir_comparacion_equivalentes_dia(totales)
+
+    def _escribir_comparacion_equivalentes_dia(self, totales):
+        objetivo = getattr(self, "nut_objetivo", None) or {}
+        kcal_objetivo = objetivo.get("kcal") or 0.0
+        objetivo_txt = (
+            f"{kcal_objetivo:.0f} kcal · {objetivo.get('proteinas') or 0:.1f} g "
+            f"proteína · {objetivo.get('carbohidratos') or 0:.1f} g "
+            f"carbohidratos · {objetivo.get('grasas') or 0:.1f} g grasas")
+        calculado_txt = (
+            f"{totales['kcal']:.0f} kcal · {totales['prot']:.1f} g proteína · "
+            f"{totales['hc']:.1f} g carbohidratos · {totales['lip']:.1f} g grasas")
+        if not kcal_objetivo:
+            self.eq_dia_resumen.config(
+                text="Objetivo del cuadro dietosintético: sin energía capturada\n"
+                     f"Con los equivalentes de la tabla 2: {calculado_txt}",
+                foreground="#555555")
+            return
+        dif_kcal = totales["kcal"] - kcal_objetivo
+        pct = dif_kcal / kcal_objetivo * 100 if kcal_objetivo else 0.0
+        diferencia_txt = (
+            f"{dif_kcal:+.0f} kcal ({pct:+.1f} %) · "
+            f"{totales['prot'] - (objetivo.get('proteinas') or 0):+.1f} g proteína · "
+            f"{totales['hc'] - (objetivo.get('carbohidratos') or 0):+.1f} g carbohidratos · "
+            f"{totales['lip'] - (objetivo.get('grasas') or 0):+.1f} g grasas")
+        dentro = abs(pct) <= 2.0
+        self.eq_dia_resumen.config(
+            text="Objetivo del cuadro dietosintético: " + objetivo_txt + "\n"
+                 "Con los equivalentes de la tabla 2:      " + calculado_txt + "\n"
+                 "Diferencia:" + " " * 25 + diferencia_txt,
+            foreground="#1E6E5C" if dentro else "#C0392B")
+
+    def _actualizar_balance_equivalentes(self):
+        """Compara la suma de cada grupo en los tiempos de comida con los
+        equivalentes del día y marca Completo, Falta N o Sobra N."""
+        if not getattr(self, "eq_balance_fila", None) or not self.eq_balance_fila:
+            return
+        for grupo in self.eq_grupos:
+            suma = 0.0
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                suma += self._equivalentes_celda(grupo, clave)
+            objetivo = self._equivalentes_dia_valor(grupo)
+            self.eq_meta_fila[grupo].config(text=self._formato_equivalentes(objetivo))
+            etiqueta = self.eq_balance_fila[grupo]
+            diferencia = suma - objetivo
+            if objetivo <= 0 and suma <= 0:
+                etiqueta.config(text="—", foreground="#999999")
+            elif diferencia == 0:
+                etiqueta.config(text="Completo", foreground="#1E6E5C")
+            elif diferencia < 0:
+                etiqueta.config(text=f"Falta {-diferencia:g}", foreground="#B26A00")
+            else:
+                etiqueta.config(text=f"Sobra +{diferencia:g}", foreground="#C0392B")
 
     def _peso_actual_equivalentes(self):
         """Peso actual del paciente en kg (última visita) y de dónde sale."""
@@ -7810,7 +9097,7 @@ class App(tk.Tk):
             f"Peso actual: {peso:.3f} kg ({peso_origen})" if peso
             else "Sin peso actual: la columna g/kg no puede calcularse")
         self.nut_origen.config(text="   |   ".join(partes))
-        self._recalcular_calculo_equivalentes()
+        self._recalcular_equivalentes_dia()
 
     @staticmethod
     def _formatos_macro(kcal, gramos, gkg):
@@ -7826,111 +9113,6 @@ class App(tk.Tk):
         except (TypeError, ValueError):
             return 0.0
         return valor if valor > 0 else 0.0
-
-    def _equivalentes_texto(self, var):
-        """Números escritos en una caja de equivalentes (admite coma decimal)."""
-        try:
-            return self._numero_equivalentes(var.get())
-        except AttributeError:
-            return 0.0
-
-    def _totales_dia_equivalentes(self, clave_dia):
-        """Aporte energético y nutrimental de un día de la semana."""
-        composicion = self._composicion_equivalentes()
-        datos = self.eq_datos_dias.get(clave_dia) or {}
-        totales = {"eq": 0.0, "kcal": 0.0, "prot": 0.0, "hc": 0.0, "lip": 0.0}
-        for grupo in self.eq_grupos:
-            capturas = datos.get(grupo) or {}
-            equivalente = sum(self._numero_equivalentes(capturas.get(comida))
-                              for comida, _etiqueta in RECUENTO_COMIDAS)
-            if equivalente <= 0:
-                continue
-            nutriente = composicion.get(grupo, {})
-            totales["eq"] += equivalente
-            totales["kcal"] += equivalente * (nutriente.get("kcal") or 0.0)
-            totales["prot"] += equivalente * (nutriente.get("proteinas_g") or 0.0)
-            totales["hc"] += equivalente * (nutriente.get("hidratos_carbono_g") or 0.0)
-            totales["lip"] += equivalente * (nutriente.get("lipidos_g") or 0.0)
-        return totales
-
-    def _totales_semana_equivalentes(self):
-        """Totales de los 7 días, en el orden de DIAS_SEMANA, y su suma."""
-        por_dia = [self._totales_dia_equivalentes(clave)
-                   for clave in DIAS_SEMANA_CLAVES]
-        semana = {clave: sum(dia[clave] for dia in por_dia)
-                  for clave in ("eq", "kcal", "prot", "hc", "lip")}
-        return por_dia, semana
-
-    def _recalcular_calculo_equivalentes(self):
-        """Tabla de cálculo: aporte de cada día de la semana y total semanal,
-        comparado con los valores del cuadro dietosintético."""
-        if not getattr(self, "eq_calc_celdas", None):
-            return
-        motivo = self._motivo_bloqueo_equivalentes()
-        if motivo:
-            for celdas in self.eq_calc_celdas.values():
-                for celda in celdas:
-                    celda.config(text="—", foreground="#C0392B")
-            self.eq_calc_resumen.config(
-                text="Cálculo de equivalentes bloqueado\n" + motivo,
-                foreground="#C0392B")
-            return
-        objetivo = getattr(self, "nut_objetivo", None) or {}
-        kcal_objetivo = objetivo.get("kcal") or 0.0
-        por_dia, semana = self._totales_semana_equivalentes()
-        columnas = list(por_dia) + [semana]
-        dias = len(DIAS_SEMANA_CLAVES)
-        for fila, _etiqueta, formato in self.eq_calc_filas:
-            for indice, celda in enumerate(self.eq_calc_celdas[fila]):
-                if indice >= len(columnas):
-                    break
-                totales = columnas[indice]
-                es_semana = indice == len(columnas) - 1
-                if fila == "dif":
-                    if kcal_objetivo <= 0:
-                        celda.config(text="—", foreground="#555555")
-                        continue
-                    base = kcal_objetivo * (dias if es_semana else 1)
-                    diferencia = totales["kcal"] - base
-                    dentro = abs(diferencia / base * 100) <= 2.0
-                    celda.config(text=formato.format(diferencia),
-                                 foreground="#1E6E5C" if dentro else "#C0392B")
-                else:
-                    celda.config(text=formato.format(totales[fila]),
-                                 foreground="#000000")
-        self._escribir_comparacion_equivalentes(semana, por_dia)
-
-    def _escribir_comparacion_equivalentes(self, semana, por_dia):
-        objetivo = getattr(self, "nut_objetivo", None) or {}
-        kcal_objetivo = objetivo.get("kcal") or 0.0
-        if not kcal_objetivo:
-            self.eq_calc_resumen.config(
-                text="Objetivo del cuadro dietosintético: sin energía capturada\n"
-                     f"Semana con los equivalentes: {semana['kcal']:.0f} kcal · "
-                     f"{semana['eq']:g} equivalentes",
-                foreground="#555555")
-            return
-        dias = len(DIAS_SEMANA_CLAVES)
-        objetivo_semana = kcal_objetivo * dias
-        diferencia = semana["kcal"] - objetivo_semana
-        pct = diferencia / objetivo_semana * 100 if objetivo_semana else 0.0
-        lineas = [
-            "Objetivo del cuadro dietosintético: "
-            f"{kcal_objetivo:.0f} kcal/día · {objetivo_semana:.0f} kcal en {dias} días",
-            "Semana con los equivalentes:            "
-            f"{semana['kcal']:.0f} kcal · {semana['eq']:g} equivalentes",
-            f"Diferencia de la semana:               {diferencia:+.0f} kcal ({pct:+.1f} %) · "
-            f"{semana['prot'] - (objetivo.get('proteinas') or 0) * dias:+.1f} g proteína · "
-            f"{semana['hc'] - (objetivo.get('carbohidratos') or 0) * dias:+.1f} g carbohidratos · "
-            f"{semana['lip'] - (objetivo.get('grasas') or 0) * dias:+.1f} g grasas",
-        ]
-        vacios = [DIAS_SEMANA_ETIQUETAS[clave] for clave, dia
-                  in zip(DIAS_SEMANA_CLAVES, por_dia) if dia["eq"] <= 0]
-        if vacios:
-            lineas.append("Días sin equivalentes capturados: " + ", ".join(vacios))
-        self.eq_calc_resumen.config(
-            text="\n".join(lineas),
-            foreground="#1E6E5C" if abs(pct) <= 2.0 else "#C0392B")
 
     def _escribir_resumen_equivalentes(self, acumulado):
         objetivo = 0.0
@@ -8101,10 +9283,14 @@ class App(tk.Tk):
     def _limpiar_distribucion_equivalentes(self, avisar=True):
         for clave in DIAS_SEMANA_CLAVES:
             self.eq_datos_dias[clave] = {}
+            self.eq_dia_datos[clave] = {}
         for grupo in self.eq_grupos:
             for clave, _comida in RECUENTO_COMIDAS:
                 self.eq_vars[(grupo, clave)].set("0")
+        for var in self.eq_dia_vars.values():
+            var.set("")
         self._recalcular_equivalentes()
+        self._recalcular_equivalentes_dia()
         if avisar:
             self.status.config(text="Cuadro dietosintético limpiado")
 
@@ -8131,11 +9317,15 @@ class App(tk.Tk):
         if not self._exigir_paciente():
             return
         filas = self._semana_distribucion_equivalentes()
+        equivalentes_dia = self._semana_equivalentes_dia()
         total = sum(self._numero_equivalentes(valor)
                     for dia in filas.values()
                     for valores in dia.values()
                     for valor in valores.values())
-        if total <= 0:
+        total_equiv_dia = sum(self._numero_equivalentes(valor)
+                              for dia in equivalentes_dia.values()
+                              for valor in dia.values())
+        if total <= 0 and total_equiv_dia <= 0:
             messagebox.showwarning(
                 "Guardar", "El cuadro no tiene equivalentes capturados")
             return
@@ -8149,7 +9339,7 @@ class App(tk.Tk):
             energia = self._kcal_objetivo_equivalentes() or None
             texto = json.dumps(filas, ensure_ascii=False)
             macro = json.dumps(self._porcentajes_macro(), ensure_ascii=False)
-            equiv = json.dumps({}, ensure_ascii=False)
+            equiv = json.dumps(equivalentes_dia, ensure_ascii=False)
             if existente:
                 cur.execute(
                     """UPDATE distribucion_equivalentes
@@ -8225,8 +9415,13 @@ class App(tk.Tk):
             filas = json.loads(fila[1] or "{}")
         except (TypeError, ValueError):
             filas = {}
+        try:
+            calculo = json.loads(fila[3] or "{}")
+        except (TypeError, ValueError):
+            calculo = {}
         self._fijar_filas_distribucion_equivalentes(
             filas, None if kcal_calculada else fila[0])
+        self._fijar_equivalentes_dia(calculo)
         self.status.config(
             text=f"Editando distribución de equivalentes | Paciente N° {self._paciente_id}")
 
@@ -8434,9 +9629,10 @@ class App(tk.Tk):
         self._editar_bioquimica(silencioso=True)
         self._editar_recuento(silencioso=True)
         self._editar_distribucion_equivalentes(silencioso=True)
-        self._actualizar_disponibilidad_calculo_equivalentes()
+        self._editar_diagnostico_pes(silencioso=True)
+        self._cargar_intervencion_pan(silencioso=True)
         self.status.config(
-            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos, equivalentes) | Paciente N° {self._paciente_id}"
+            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos, equivalentes, diagnóstico nutricio, intervención) | Paciente N° {self._paciente_id}"
         )
 
 if __name__ == "__main__":
