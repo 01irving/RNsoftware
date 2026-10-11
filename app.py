@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sqlite3
 import tkinter as tk
 from datetime import date, datetime, timedelta
@@ -25,6 +26,14 @@ except ImportError:
     _PGObservation = None
     _PGEx = None
     PIGROWUP_OK = False
+
+try:
+    from PIL import Image as _PIL_Image, ImageTk as _PIL_ImageTk
+    PILLOW_OK = True
+except ImportError:
+    _PIL_Image = None
+    _PIL_ImageTk = None
+    PILLOW_OK = False
 
 try:
     import anthro as _ANTHRO
@@ -359,6 +368,10 @@ RECUENTO_COMIDAS = [
 ]
 RECUENTO_COMIDAS_CLAVES = [c[0] for c in RECUENTO_COMIDAS]
 
+# Pestaña Elaboración de menús: nombre del platillo y foto por tiempo de comida
+# (se guardan por día; la imagen va en la tabla menu_imagenes).
+MENU_PLATILLOS_CLAVE = "_platillos"
+
 # Diagnóstico nutricio — Paso 2 del PAN (enunciado PESS).
 # Terminología de referencia: Academy of Nutrition and Dietetics
 # (IDNT / eNCPT), por dominio: Ingestión (NI), Clínico (NC) y
@@ -602,78 +615,6 @@ INTERVENCIONES_PAN = [
 ]
 ESTADOS_INTERVENCION = ["Activa", "Reformulada", "Suspendida", "Completada"]
 
-# Contenido del folleto "Consejos para una lactancia materna exitosa" (UNICEF
-# México, www.unicef.org/mexico). Cada elemento: (estilo, línea).
-LACTANCIA_MATERNA_CONTENIDO = [
-    ("titulo", "LACTANCIA MATERNA — Consejos para una lactancia materna exitosa"),
-    ("norm", "Documento de referencia: Consejos para una lactancia materna exitosa "
-             "(UNICEF México · #SíaLaLactancia · www.unicef.org/mexico)."),
-    ("seccion", "Extracción de la leche materna"),
-    ("norm", "1. Antes de extraer tu leche debes lavarte las manos."),
-    ("norm", "2. Date masaje en los pechos en forma de círculo, siguiendo las "
-             "manecillas del reloj y presionando ligeramente con los dedos."),
-    ("norm", "3. Frota los pechos presionando suavemente de atrás hacia adelante."),
-    ("norm", "4. Inclínate sacudiendo los pechos para que baje la leche."),
-    ("norm", "5. Exprime presionando los pechos sin lastimarte y deposita la leche "
-             "en un recipiente limpio."),
-    ("norm", "6. Repite los pasos 2 al 5 en cada pecho y, cuando el recipiente esté "
-             "lleno, tápalo."),
-    ("norm", "Después de extraer tu leche debes mantenerla refrigerada."),
-    ("seccion", "Conservación de la leche materna"),
-    ("bullet", "Colócale al recipiente una etiqueta con la fecha y hora de la extracción."),
-    ("bullet", "Guarda el recipiente en el refrigerador."),
-    ("bullet", "Cuando entibies la leche debe ser a baño María, no en el microondas ni "
-               "a fuego directo, porque perderá sus propiedades."),
-    ("bullet", "Para transportarla es necesario tener una hielera."),
-    ("norm", "La leche se puede guardar:"),
-    ("bullet", "4 a 8 horas a temperatura ambiente (16 a 26 grados)."),
-    ("bullet", "5 a 8 días en el refrigerador."),
-    ("bullet", "2 semanas en el cajón de congelación del refrigerador."),
-    ("bullet", "3 meses en un congelador independiente."),
-    ("seccion", "RECUERDA"),
-    ("bullet", "Antes de los 6 meses no debes darle a tu bebé ningún otro alimento que "
-               "no sea tu leche."),
-    ("bullet", "Después de los 6 meses se aconseja iniciar la alimentación con sólidos "
-               "y continuar con la lactancia materna hasta los dos años."),
-    ("norm", "La leche materna es el mejor alimento que un bebé puede recibir de forma "
-             "exclusiva durante los primeros seis meses de edad y, combinada con otros "
-             "alimentos, hasta los dos años o más."),
-    ("seccion", "¿Cómo amamantar a tu bebé?"),
-    ("norm", "Tú y tu bebé deben estar cómodos, tranquilos y relajados. Con la espalda "
-             "recta y los hombros relajados, debes acercar al bebé a tu pecho para "
-             "comenzar con la alimentación."),
-    ("norm", "Una posición incorrecta puede causar problemas como: dolor en los pezones, "
-             "rechazo a la alimentación e insuficiente producción de leche."),
-    ("bullet", "Asegúrate de tener un buen agarre al pecho: acércate a tu bebé y asegúrate "
-               "de que el pezón y la areola queden dentro de su boca. El mentón y la nariz "
-               "deben rozar el pecho pero sin limitar su respiración."),
-    ("bullet", "Siéntate y apoya la espalda. Sosteniendo el pecho con tus cuatro dedos por "
-               "abajo y el pulgar arriba, sobre la areola, toca con el pezón el labio "
-               "inferior de tu bebé hasta que abra la boca."),
-    ("bullet", "Amamantar en la noche es muy importante. Apóyate con comodidad sobre una "
-               "almohada y recuesta a tu bebé de lado de manera que su cabeza quede al "
-               "mismo nivel de tu pecho. Durante la toma, la cabeza de tu bebé debe estar "
-               "sobre una almohada doblada."),
-    ("bullet", "Tu leche también se puede extraer y guardar. Para sacarla, masajea tu pecho "
-               "y luego, con los dedos abiertos por encima de la areola, comprime hacia "
-               "atrás y después presiona la areola hacia el pezón."),
-    ("seccion", "Beneficios de la lactancia"),
-    ("sub", "Para el bebé:"),
-    ("bullet", "Es de fácil digestión, lo que disminuye los cólicos."),
-    ("bullet", "Disminuye el riesgo de enfermedades más comunes en la infancia como otitis "
-               "media aguda, dermatitis atópica, infecciones gastrointestinales, asma y "
-               "alergias, infecciones de las vías respiratorias, sobrepeso y obesidad."),
-    ("bullet", "Favorece el desarrollo emocional e intelectual."),
-    ("sub", "Para la madre:"),
-    ("bullet", "Disminuye el riesgo de hemorragia después del nacimiento del bebé."),
-    ("bullet", "Contribuye a evitar la depresión post-parto."),
-    ("bullet", "Mejora su colesterol y triglicéridos."),
-    ("bullet", "Previene a largo plazo la osteoporosis, el cáncer de mama y de ovario."),
-    ("norm", "La lactancia es la forma más natural y accesible de contribuir a la salud "
-             "y supervivencia de las niñas y los niños."),
-    ("norm", "Si tienes alguna duda o pregunta sobre cómo amamantar a tu bebé, acude al "
-             "centro de salud u hospital de tu confianza."),
-]
 RECUENTO_COMIDAS_ETIQUETAS = {c[0]: c[1] for c in RECUENTO_COMIDAS}
 RECUENTO_COMIDAS_VALORES = [c[1] for c in RECUENTO_COMIDAS]
 # Etiquetas de versiones anteriores, para no perder recuentos ya guardados.
@@ -3381,6 +3322,7 @@ class App(tk.Tk):
         self._tab_diagnostico_pes()
         self._tab_intervencion_pan()
         self._tab_lactancia_materna()
+        self._tab_menu_elaboracion()
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", padx=8, pady=8)
@@ -8710,59 +8652,1139 @@ class App(tk.Tk):
         if avisar:
             self.status.config(text="Intervención nutricional reiniciada")
 
+    # ---------- Pestaña 12: Elaboración de menús (SMAE-5) ----------
+    def _tab_menu_elaboracion(self):
+        """Paso 3 del PAN: elaboración de menús por tiempo de comida a partir de la
+        distribución de equivalentes (pestaña 9) y del catálogo SMAE-5."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="12. Elaboración de menús")
+        self._tab_menu = tab
+        self.men_dia = DIAS_SEMANA_CLAVES[0]
+        self.men_datos_dias = {clave: {} for clave in DIAS_SEMANA_CLAVES}
+        self._menu_catalogo = None
+        self.men_trees = {}
+        self.men_grupo_var = {}
+        self.men_alimento_var = {}
+        self.men_alimento_combo = {}
+        self.men_equiv_var = {}
+        self.men_resumen = {}
+        self.men_platillo_var = {}
+        self.men_imagen_label = {}
+        self.men_imagen_photo = {}
+        self._iniciar_platillos_sesion()
+        self.men_objetivos = self._menu_objetivos_dia(self.men_dia)
+
+        barra = ttk.Frame(tab)
+        barra.pack(fill="x", padx=8, pady=4)
+        ttk.Label(barra, text="Día de la semana:",
+                  font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(4, 8))
+        self.men_dia_var = tk.StringVar(value=self.men_dia)
+        for clave, etiqueta in DIAS_SEMANA:
+            ttk.Radiobutton(
+                barra, text=etiqueta, value=clave, variable=self.men_dia_var,
+                command=self._cambiar_dia_menu).pack(side="left", padx=3)
+        ttk.Button(barra, text="Generar menú sugerido",
+                   command=self._generar_menu_sugerido).pack(side="right", padx=3)
+        ttk.Button(barra, text="Imprimir PDF",
+                   command=self._imprimir_menu_pdf).pack(side="right", padx=3)
+        ttk.Button(barra, text="Guardar menú",
+                   command=self._guardar_menu_elaboracion).pack(side="right", padx=3)
+        ttk.Button(barra, text="Editar",
+                   command=self._editar_menu_elaboracion).pack(side="right", padx=3)
+        ttk.Button(barra, text="Limpiar",
+                   command=self._limpiar_menu_elaboracion).pack(side="right", padx=3)
+
+        barra_eq = ttk.Frame(tab)
+        barra_eq.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Button(barra_eq, text="Imprimir equivalentes (PDF)",
+                   command=self._imprimir_equivalentes_menu_pdf
+                   ).pack(side="right", padx=3)
+
+        contenedor = ttk.Frame(tab)
+        contenedor.pack(fill="both", expand=True)
+        canvas = tk.Canvas(contenedor, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        interior.bind("<Configure>",
+                      lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(ventana, width=e.width))
+        canvas.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+        # --- Distribución del día: meta a cumplir (de la pestaña 9) ---
+        marco_ref = ttk.LabelFrame(
+            interior, text="Distribución de equivalentes del día (meta a cumplir en el menú)")
+        marco_ref.pack(fill="x", padx=10, pady=6)
+        self.men_ref_titulo = ttk.Label(marco_ref, text="",
+                                        font=("TkDefaultFont", 9, "bold"))
+        self.men_ref_titulo.pack(anchor="w", padx=8, pady=(6, 2))
+        acortados = {"colacion_matutina": "Col. matutina",
+                     "colacion_vespertina": "Col. vespertina"}
+        columnas_ref = ["grupo"] + RECUENTO_COMIDAS_CLAVES + ["total"]
+        titulos_ref = ["Grupo de alimentos"] + [
+            acortados.get(clave, etiqueta) for clave, etiqueta in RECUENTO_COMIDAS
+        ] + ["Total/día"]
+        self.men_ref_tree = ttk.Treeview(marco_ref, columns=columnas_ref,
+                                         show="headings",
+                                         height=len(self.eq_grupos) + 1)
+        for columna, titulo in zip(columnas_ref, titulos_ref):
+            self.men_ref_tree.heading(columna, text=titulo)
+            self.men_ref_tree.column(columna, width=90, anchor="center",
+                                     stretch=(columna == "grupo"))
+        self.men_ref_tree.column("grupo", width=230, anchor="w")
+        self.men_ref_tree.tag_configure("total", font=("TkDefaultFont", 9, "bold"))
+        self.men_ref_tree.pack(fill="x", padx=8, pady=(0, 6))
+
+        # --- Editor por tiempo de comida ---
+        self.men_marco_tiempos = ttk.LabelFrame(
+            interior, text="Elaboración del menú por tiempo de comida — "
+                           "(alimentos SMAE-5: cada 1 equivalente es la porción de "
+                           "referencia del catálogo)")
+        self.men_marco_tiempos.pack(fill="x", padx=10, pady=6)
+        for _clave, _etiqueta in RECUENTO_COMIDAS:
+            self._crear_tiempo_menu(_clave, _etiqueta)
+
+        self._cargar_dia_menu(self.men_dia)
+
+    def _crear_tiempo_menu(self, clave, etiqueta):
+        marco = ttk.LabelFrame(self.men_marco_tiempos, text=etiqueta)
+        marco.pack(fill="x", padx=8, pady=4)
+
+        cabecera = ttk.Frame(marco)
+        cabecera.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(cabecera, text="Platillo:",
+                  font=("TkDefaultFont", 9)).pack(side="left", padx=(0, 3))
+        platillo_var = tk.StringVar()
+        platillo_entry = ttk.Entry(cabecera, textvariable=platillo_var, width=36)
+        platillo_entry.pack(side="left", padx=3)
+        platillo_var.trace_add(
+            "write", lambda *a, t=clave: self._men_platillo_cambio(t))
+        self.men_platillo_var[clave] = platillo_var
+        ttk.Button(cabecera, text="Subir imagen",
+                   command=lambda t=clave: self._men_subir_imagen(t)
+                   ).pack(side="left", padx=3)
+        ttk.Button(cabecera, text="Quitar imagen",
+                   command=lambda t=clave: self._men_quitar_imagen(t)
+                   ).pack(side="left", padx=3)
+        marco_thumb = ttk.Frame(marco)
+        marco_thumb.pack(fill="x", padx=6, pady=(0, 2))
+        self.men_imagen_label[clave] = ttk.Label(
+            marco_thumb, text="Sin imagen", width=28, anchor="w",
+            foreground="#888888")
+        self.men_imagen_label[clave].pack(anchor="w")
+
+        columnas = ["grupo", "alimento", "eq", "porcion", "peso", "kcal",
+                    "prot", "lip", "hc", "fibra"]
+        titulos = ["Grupo", "Alimento", "Eq", "Porción", "Neto (g)", "kcal",
+                   "Prot (g)", "Lip (g)", "HC (g)", "Fibra (g)"]
+        tree = ttk.Treeview(marco, columns=columnas, show="headings", height=5)
+        for columna, titulo in zip(columnas, titulos):
+            tree.heading(columna, text=titulo)
+            if columna == "alimento":
+                tree.column(columna, width=210, anchor="w", stretch=True)
+            elif columna == "grupo":
+                tree.column(columna, width=150, anchor="w", stretch=False)
+            else:
+                tree.column(columna, width=72, anchor="e", stretch=False)
+        tree.pack(fill="x", padx=6, pady=(4, 2))
+        self.men_trees[clave] = tree
+
+        fila_controles = ttk.Frame(marco)
+        fila_controles.pack(fill="x", padx=6, pady=(0, 2))
+        ttk.Label(fila_controles, text="Grupo:").pack(side="left", padx=(0, 3))
+        grupo_var = tk.StringVar()
+        grupo_combo = ttk.Combobox(fila_controles, textvariable=grupo_var,
+                                   width=24, state="readonly",
+                                   values=self.eq_grupos)
+        grupo_combo.pack(side="left", padx=3)
+        grupo_combo.bind("<<ComboboxSelected>>",
+                         lambda e, t=clave: self._menu_cambio_grupo(t))
+        self.men_grupo_var[clave] = grupo_var
+        ttk.Label(fila_controles, text="Alimento:").pack(side="left", padx=(6, 3))
+        alimento_var = tk.StringVar()
+        alimento_combo = ttk.Combobox(fila_controles, textvariable=alimento_var,
+                                      width=42)
+        alimento_combo.pack(side="left", padx=3)
+        alimento_combo.bind("<KeyRelease>",
+                            lambda e, t=clave: self._men_filtrar_alimentos(t))
+        self.men_alimento_var[clave] = alimento_var
+        self.men_alimento_combo[clave] = alimento_combo
+        ttk.Label(fila_controles, text="Eq:").pack(side="left", padx=(6, 3))
+        equiv_var = tk.StringVar(value="")
+        equiv_entry = ttk.Entry(fila_controles, textvariable=equiv_var, width=6,
+                                justify="center")
+        equiv_entry.pack(side="left", padx=3)
+        self.men_equiv_var[clave] = equiv_var
+        ttk.Button(fila_controles, text="Agregar",
+                   command=lambda t=clave: self._men_agregar(t)).pack(side="left", padx=3)
+        ttk.Button(fila_controles, text="Quitar seleccionado",
+                   command=lambda t=clave: self._men_quitar(t)).pack(side="left", padx=3)
+        resumen = ttk.Label(marco, text="", foreground="#555555",
+                            font=("TkDefaultFont", 9))
+        resumen.pack(anchor="w", padx=8, pady=(0, 4))
+        self.men_resumen[clave] = resumen
+
+    def _menu_catalogo_grupos(self):
+        """Catálogo SMAE-5 por grupo (cacheado en la sesión)."""
+        if getattr(self, "_menu_catalogo", None) is None:
+            conn = conectar()
+            try:
+                filas = conn.execute(
+                    "SELECT grupo, alimento, cantidad_sugerida, unidad, peso_neto_g, "
+                    "kcal, proteinas_g, lipidos_g, hidratos_carbono_g, fibra_g "
+                    "FROM alimentos_smae ORDER BY grupo, alimento").fetchall()
+            finally:
+                conn.close()
+            catalogo = {}
+            for f in filas:
+                catalogo.setdefault(f[0] or "", []).append({
+                    "grupo": f[0] or "", "alimento": f[1],
+                    "cantidad": (f[2] or ""), "unidad": (f[3] or ""),
+                    "peso_neto_g": f[4] or 0.0, "kcal": f[5] or 0.0,
+                    "proteinas_g": f[6] or 0.0, "lipidos_g": f[7] or 0.0,
+                    "hc_g": f[8] or 0.0, "fibra_g": f[9] or 0.0})
+            self._menu_catalogo = catalogo
+        return self._menu_catalogo
+
+    def _menu_buscar_food(self, nombre):
+        for lista in self._menu_catalogo_grupos().values():
+            for r in lista:
+                if r["alimento"] == nombre:
+                    return r
+        return None
+
+    def _iniciar_platillos_sesion(self):
+        """Platillos e imágenes por día y tiempo (en memoria durante la edición)."""
+        self.men_platillos = {
+            dia: {tiempo: {"platillo": "", "imagen": None}
+                  for tiempo, _etiqueta in RECUENTO_COMIDAS}
+            for dia in DIAS_SEMANA_CLAVES}
+
+    def _men_platillo_cambio(self, clave):
+        """Guarda en memoria el nombre del platillo escrito para el día/tiempo."""
+        self.men_platillos.setdefault(self.men_dia, {}).setdefault(clave, {})
+        self.men_platillos[self.men_dia][clave]["platillo"] = (
+            self.men_platillo_var[clave].get())
+
+    def _mostrar_imagen_menu(self, clave):
+        """Muestra la miniatura del platillo del día/tiempo (si hay imagen)."""
+        datos = (self.men_platillos.get(self.men_dia, {}).get(clave, {})
+                 or {}).get("imagen")
+        label = self.men_imagen_label[clave]
+        self.men_imagen_photo[clave] = None
+        if not datos:
+            label.config(image="", text="Sin imagen")
+            return
+        if not PILLOW_OK:
+            label.config(image="", text="(imagen no visible: pillow no instalado)")
+            return
+        try:
+            imagen = _PIL_Image.open(io.BytesIO(datos))
+            imagen.load()
+            imagen.thumbnail((140, 100))
+            foto = _PIL_ImageTk.PhotoImage(imagen)
+        except Exception:
+            label.config(image="", text="(imagen no visible)")
+            return
+        self.men_imagen_photo[clave] = foto
+        label.config(image=foto, text="")
+
+    def _men_subir_imagen(self, clave):
+        ruta = filedialog.askopenfilename(
+            parent=self, title="Seleccionar imagen del platillo",
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                       ("Todos los archivos", "*.*")])
+        if not ruta:
+            return
+        if not PILLOW_OK:
+            messagebox.showwarning(
+                "Subir imagen",
+                "pillow (PIL) no está instalado: no se puede procesar la imagen.")
+            return
+        try:
+            with open(ruta, "rb") as f:
+                datos = f.read()
+            imagen = _PIL_Image.open(io.BytesIO(datos))
+            imagen.load()
+            imagen.thumbnail((140, 100))
+            foto = _PIL_ImageTk.PhotoImage(imagen)
+        except Exception as e:
+            messagebox.showerror("Subir imagen", f"No se pudo cargar la imagen:\n{e}")
+            return
+        self.men_platillos.setdefault(self.men_dia, {}).setdefault(clave, {})
+        self.men_platillos[self.men_dia][clave]["imagen"] = datos
+        self.men_imagen_photo[clave] = foto
+        self.men_imagen_label[clave].config(image=foto, text="")
+        self.status.config(
+            text="Imagen del platillo cargada (se guarda con el menú)")
+
+    def _men_quitar_imagen(self, clave):
+        self.men_platillos.setdefault(self.men_dia, {}).setdefault(clave, {})
+        self.men_platillos[self.men_dia][clave]["imagen"] = None
+        self.men_imagen_photo[clave] = None
+        self.men_imagen_label[clave].config(image="", text="Sin imagen")
+
+    def _menu_objetivos_dia(self, clave_dia):
+        """Meta (equivalentes) por tiempo y grupo del día, desde la pestaña 9."""
+        objetivos = {}
+        datos = (getattr(self, "eq_datos_dias", None) or {}).get(clave_dia) or {}
+        for grupo in getattr(self, "eq_grupos", []):
+            capturas = datos.get(grupo) or {}
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                valor = self._numero_equivalentes(capturas.get(clave))
+                if valor > 0:
+                    objetivos.setdefault(clave, {})[grupo] = valor
+        return objetivos
+
+    def _menu_total_dia_grupo(self, grupo, clave_dia):
+        """Total/día del grupo: de «equivalentes por día» o la suma del cuadro."""
+        eq_dia = (getattr(self, "eq_dia_datos", None) or {}).get(clave_dia, {}).get(grupo)
+        if eq_dia is not None and str(eq_dia).strip():
+            return self._numero_equivalentes(eq_dia)
+        total = 0.0
+        datos = (getattr(self, "eq_datos_dias", None) or {}).get(clave_dia) or {}
+        for clave, _etiqueta in RECUENTO_COMIDAS:
+            total += self._numero_equivalentes((datos.get(grupo) or {}).get(clave))
+        return total
+
+    def _cambiar_dia_menu(self):
+        if not getattr(self, "men_trees", None):
+            return
+        nuevo = self.men_dia_var.get()
+        if nuevo not in DIAS_SEMANA_CLAVES:
+            nuevo = DIAS_SEMANA_CLAVES[0]
+        self.men_dia = nuevo
+        self._cargar_dia_menu(nuevo)
+
+    def _cargar_dia_menu(self, clave_dia):
+        self.men_datos_dias.setdefault(clave_dia, {})
+        self.men_objetivos = self._menu_objetivos_dia(clave_dia)
+        titulo_dia = " — " + DIAS_SEMANA_ETIQUETAS.get(clave_dia, clave_dia)
+        self.men_ref_titulo.config(
+            text="Meta del día" + titulo_dia
+                 + " (equivalentes capturados en la pestaña 9)")
+        self.men_marco_tiempos.config(
+            text="Elaboración del menú por tiempo de comida" + titulo_dia
+                 + " (alimentos SMAE-5: cada 1 equivalente es la porción de "
+                   "referencia del catálogo)")
+        self._cargar_tabla_referencia(clave_dia)
+        for clave, _etiqueta in RECUENTO_COMIDAS:
+            self._cargar_tiempo_en_tree(clave)
+            self._actualizar_resumen_tiempo(clave)
+            platillo = (self.men_platillos.get(clave_dia, {}).get(clave, {})
+                        or {}).get("platillo", "")
+            self.men_platillo_var[clave].set(platillo)
+            self._mostrar_imagen_menu(clave)
+
+    def _cargar_tabla_referencia(self, clave_dia):
+        tree = self.men_ref_tree
+        tree.delete(*tree.get_children())
+        datos = (getattr(self, "eq_datos_dias", None) or {}).get(clave_dia) or {}
+        for grupo in self.eq_grupos:
+            capturas = datos.get(grupo) or {}
+            valores = []
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                valores.append(self._formato_equivalentes(
+                    self._numero_equivalentes(capturas.get(clave))))
+            valores.append(self._formato_equivalentes(
+                self._menu_total_dia_grupo(grupo, clave_dia)))
+            tree.insert("", "end", values=[grupo] + valores)
+        totales = []
+        for clave, _etiqueta in RECUENTO_COMIDAS:
+            totales.append(self._formato_equivalentes(sum(
+                self._numero_equivalentes((datos.get(g) or {}).get(clave))
+                for g in self.eq_grupos)))
+        totales.append(self._formato_equivalentes(sum(
+            self._menu_total_dia_grupo(g, clave_dia) for g in self.eq_grupos)))
+        tree.insert("", "end", values=["TOTAL DEL DÍA"] + totales, tags=("total",))
+
+    def _cargar_tiempo_en_tree(self, clave):
+        tree = self.men_trees[clave]
+        tree.delete(*tree.get_children())
+        for i, r in enumerate(self.men_datos_dias.get(self.men_dia, {}).get(clave, [])):
+            eq = r.get("equiv", 0.0)
+            porcion = f"{eq:g}"
+            if str(r.get("cantidad") or "").strip():
+                porcion += " × " + str(r["cantidad"])
+                if str(r.get("unidad") or "").strip():
+                    porcion += " " + str(r["unidad"]).strip()
+            tree.insert("", "end", iid=f"row_{i}", values=(
+                r["grupo"], r["alimento"], f"{eq:g}", porcion,
+                f"{(r.get('peso_neto_g') or 0.0) * eq:.0f}",
+                f"{(r.get('kcal') or 0.0) * eq:.0f}",
+                f"{(r.get('proteinas_g') or 0.0) * eq:.1f}",
+                f"{(r.get('lipidos_g') or 0.0) * eq:.1f}",
+                f"{(r.get('hc_g') or 0.0) * eq:.1f}",
+                f"{(r.get('fibra_g') or 0.0) * eq:.1f}"))
+
+    def _actualizar_resumen_tiempo(self, clave):
+        etiqueta = self.men_resumen[clave]
+        filas = self.men_datos_dias.get(self.men_dia, {}).get(clave, [])
+        totales = {"eq": 0.0, "kcal": 0.0, "prot": 0.0, "lip": 0.0,
+                   "hc": 0.0, "fibra": 0.0}
+        capturado = {}
+        for r in filas:
+            e = r.get("equiv", 0.0)
+            totales["eq"] += e
+            totales["kcal"] += e * (r.get("kcal") or 0.0)
+            totales["prot"] += e * (r.get("proteinas_g") or 0.0)
+            totales["lip"] += e * (r.get("lipidos_g") or 0.0)
+            totales["hc"] += e * (r.get("hc_g") or 0.0)
+            totales["fibra"] += e * (r.get("fibra_g") or 0.0)
+            capturado[r["grupo"]] = capturado.get(r["grupo"], 0.0) + e
+        metas = self.men_objetivos.get(clave) or {}
+        partes = []
+        hay_falta = False
+        hay_sobra = False
+        for grupo in self.eq_grupos:
+            objetivo = metas.get(grupo, 0.0)
+            if objetivo <= 0:
+                continue
+            hecho = capturado.get(grupo, 0.0)
+            diferencia = hecho - objetivo
+            if abs(diferencia) < 0.05:
+                estado = f"{self._formato_equivalentes(objetivo)} OK"
+            elif diferencia < 0:
+                estado = (f"{self._formato_equivalentes(hecho)}/"
+                          f"{self._formato_equivalentes(objetivo)} "
+                          f"(falta {self._formato_equivalentes(-diferencia)})")
+                hay_falta = True
+            else:
+                estado = (f"{self._formato_equivalentes(hecho)}/"
+                          f"{self._formato_equivalentes(objetivo)} "
+                          f"(sobra +{self._formato_equivalentes(diferencia)})")
+                hay_sobra = True
+            partes.append(f"{grupo}: {estado}")
+        linea1 = (f"Total: {self._formato_equivalentes(totales['eq'])} eq · "
+                  f"{totales['kcal']:.0f} kcal · {totales['prot']:.1f} g prot · "
+                  f"{totales['lip']:.1f} g lip · {totales['hc']:.1f} g HC · "
+                  f"{totales['fibra']:.1f} g fibra")
+        if not metas:
+            etiqueta.config(text=linea1 + "\nSin meta explícita en la distribución "
+                                          "(pestaña 9) para este tiempo de comida.")
+            return
+        color = "#1E6E5C"
+        if hay_falta:
+            color = "#B26A00"
+        elif hay_sobra:
+            color = "#C0392B"
+        etiqueta.config(text=linea1 + "\n" + "   |   ".join(partes),
+                        foreground=color)
+
+    def _menu_cambio_grupo(self, clave):
+        grupo = self.men_grupo_var[clave].get()
+        combo = self.men_alimento_combo[clave]
+        combo.set("")
+        combo.configure(values=[r["alimento"] for r in
+                                self._menu_catalogo_grupos().get(grupo, [])])
+        self._menu_sugerir_equivalentes(clave, grupo)
+
+    def _menu_sugerir_equivalentes(self, clave, grupo):
+        metas = self.men_objetivos.get(clave) or {}
+        objetivo = metas.get(grupo, 0.0)
+        if objetivo <= 0:
+            self.men_equiv_var[clave].set("")
+            return
+        filas = self.men_datos_dias.get(self.men_dia, {}).get(clave, [])
+        hecho = sum(r.get("equiv", 0.0) for r in filas if r["grupo"] == grupo)
+        restante = objetivo - hecho
+        self.men_equiv_var[clave].set(
+            self._formato_equivalentes(max(restante, 0.0)))
+
+    def _men_filtrar_alimentos(self, clave):
+        combo = self.men_alimento_combo[clave]
+        texto = combo.get().strip()
+        grupo = self.men_grupo_var[clave].get()
+        catalogo = self._menu_catalogo_grupos()
+        if grupo:
+            lista = catalogo.get(grupo, [])
+        else:
+            lista = [r for grupo_lista in catalogo.values() for r in grupo_lista]
+        if texto:
+            lista = [r for r in lista
+                     if texto.lower() in r["alimento"].lower()]
+        lista = lista[:200]
+        combo.configure(values=[r["alimento"] for r in lista])
+        if lista and texto:
+            try:
+                combo.event_generate("<Down>")
+            except tk.TclError:
+                pass
+
+    def _men_agregar(self, clave):
+        grupo = self.men_grupo_var[clave].get()
+        nombre = self.men_alimento_var[clave].get().strip()
+        if not nombre:
+            messagebox.showwarning(
+                "Agregar alimento",
+                "Escriba o elija un alimento del catálogo SMAE-5.")
+            return
+        food = self._menu_buscar_food(nombre)
+        if food is None:
+            messagebox.showwarning(
+                "Agregar alimento",
+                f"«{nombre}» no está en el catálogo SMAE-5.")
+            return
+        if grupo and food["grupo"] != grupo:
+            messagebox.showwarning(
+                "Agregar alimento",
+                f"«{nombre}» pertenece al grupo «{food['grupo']}», y no a «{grupo}».")
+            return
+        try:
+            eq = float(str(self.men_equiv_var[clave].get()).replace(",", ".").strip() or 0)
+        except (TypeError, ValueError):
+            eq = 0.0
+        if eq <= 0:
+            messagebox.showwarning(
+                "Agregar alimento",
+                "Escriba una cantidad de equivalentes mayor que cero.")
+            return
+        fila = {"grupo": food["grupo"], "alimento": food["alimento"], "equiv": eq,
+                "cantidad": food.get("cantidad") or "",
+                "unidad": food.get("unidad") or "",
+                "peso_neto_g": food.get("peso_neto_g") or 0.0,
+                "kcal": food.get("kcal") or 0.0,
+                "proteinas_g": food.get("proteinas_g") or 0.0,
+                "lipidos_g": food.get("lipidos_g") or 0.0,
+                "hc_g": food.get("hc_g") or 0.0,
+                "fibra_g": food.get("fibra_g") or 0.0}
+        self.men_datos_dias.setdefault(self.men_dia, {}).setdefault(clave, []).append(fila)
+        self._cargar_tiempo_en_tree(clave)
+        self._menu_sugerir_equivalentes(clave, food["grupo"])
+        self._actualizar_resumen_tiempo(clave)
+
+    def _men_quitar(self, clave):
+        tree = self.men_trees[clave]
+        sel = tree.selection()
+        if not sel:
+            return
+        indices = set()
+        for iid in sel:
+            if str(iid).startswith("row_"):
+                try:
+                    indices.add(int(str(iid).split("_")[1]))
+                except ValueError:
+                    pass
+        filas = self.men_datos_dias.get(self.men_dia, {}).get(clave, [])
+        self.men_datos_dias[self.men_dia][clave] = [
+            r for i, r in enumerate(filas) if i not in indices]
+        self._cargar_tiempo_en_tree(clave)
+        self._actualizar_resumen_tiempo(clave)
+
+    @staticmethod
+    def _fila_menu_sugerida(alimentos, grupo, objetivo):
+        """Reparte el objetivo del grupo entre 1-2 alimentos del catálogo."""
+        filas = []
+        if not alimentos:
+            return filas
+        if objetivo <= 1.0 or len(alimentos) < 2:
+            elegidos = [(alimentos[0], objetivo)]
+        else:
+            e1 = max(0.5, round(objetivo / 2.0 * 2) / 2.0)
+            elegidos = [(alimentos[0], e1), (alimentos[1], objetivo - e1)]
+        for r, e in elegidos:
+            if e <= 0:
+                continue
+            filas.append({"grupo": grupo, "alimento": r["alimento"],
+                          "equiv": round(e, 2),
+                          "cantidad": r.get("cantidad") or "",
+                          "unidad": r.get("unidad") or "",
+                          "peso_neto_g": r.get("peso_neto_g") or 0.0,
+                          "kcal": r.get("kcal") or 0.0,
+                          "proteinas_g": r.get("proteinas_g") or 0.0,
+                          "lipidos_g": r.get("lipidos_g") or 0.0,
+                          "hc_g": r.get("hc_g") or 0.0,
+                          "fibra_g": r.get("fibra_g") or 0.0})
+        return filas
+
+    def _generar_menu_sugerido(self):
+        if not getattr(self, "men_trees", None):
+            return
+        t_dia = DIAS_SEMANA_ETIQUETAS.get(self.men_dia, self.men_dia)
+        if not messagebox.askyesno(
+                "Generar menú sugerido",
+                f"Se generará el menú del {t_dia} eligiendo alimentos del catálogo "
+                "SMAE-5 para cubrir la distribución de equivalentes de la pestaña 9.\n"
+                "Se reemplazará el menú actual de este día. ¿Continuar?"):
+            return
+        catalogo = self._menu_catalogo_grupos()
+        nuevo = {}
+        for clave, _etiqueta in RECUENTO_COMIDAS:
+            metas = self.men_objetivos.get(clave) or {}
+            lineas = []
+            for grupo in self.eq_grupos:
+                objetivo = metas.get(grupo, 0.0)
+                if objetivo <= 0:
+                    continue
+                lineas.extend(self._fila_menu_sugerida(
+                    catalogo.get(grupo, []), grupo, objetivo))
+            nuevo[clave] = lineas
+        self.men_datos_dias[self.men_dia] = nuevo
+        self._cargar_dia_menu(self.men_dia)
+        self.status.config(
+            text=f"Menú sugerido generado para {t_dia} | Paciente N° {self._paciente_id}")
+
+    def _menu_equivalentes_dia_total(self, clave_dia):
+        total = 0.0
+        for tiempo, filas in (self.men_datos_dias.get(clave_dia) or {}).items():
+            if tiempo.startswith("_"):
+                continue
+            total += sum(r.get("equiv", 0.0) for r in (filas or []))
+        return total
+
+    def _crear_tabla_menus(self, cur):
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS menu (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   menu_json TEXT,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')))""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_menu_paciente ON menu(paciente_id)")
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS menu_imagenes (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+                   dia TEXT,
+                   tiempo TEXT,
+                   imagen BLOB,
+                   fecha_registro TEXT DEFAULT (datetime('now','localtime')))""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_menu_imagenes_paciente "
+                    "ON menu_imagenes(paciente_id)")
+
+    def _guardar_menu_elaboracion(self):
+        if not self._exigir_paciente():
+            return
+        if not any(self._menu_equivalentes_dia_total(clave) > 0
+                   for clave in DIAS_SEMANA_CLAVES):
+            messagebox.showwarning(
+                "Guardar menú", "El menú no tiene alimentos capturados")
+            return
+        semana = {}
+        for clave in DIAS_SEMANA_CLAVES:
+            contenedor = dict(self.men_datos_dias.get(clave) or {})
+            platillo_por_tiempo = {}
+            for tiempo, _etiqueta in RECUENTO_COMIDAS:
+                platillo = (self.men_platillos.get(clave, {}).get(tiempo, {})
+                            or {}).get("platillo", "").strip()
+                if platillo:
+                    platillo_por_tiempo[tiempo] = {"platillo": platillo}
+            if platillo_por_tiempo:
+                contenedor[MENU_PLATILLOS_CLAVE] = platillo_por_tiempo
+            semana[clave] = contenedor
+        texto = json.dumps(semana, ensure_ascii=False)
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            self._crear_tabla_menus(cur)
+            existente = cur.execute(
+                "SELECT id FROM menu WHERE paciente_id = ? ORDER BY id DESC LIMIT 1",
+                (self._paciente_id,)).fetchone()
+            if existente:
+                cur.execute(
+                    "UPDATE menu SET menu_json = ?, "
+                    "fecha_registro = datetime('now','localtime') WHERE id = ?",
+                    (texto, existente[0]))
+            else:
+                cur.execute("INSERT INTO menu (paciente_id, menu_json) VALUES (?, ?)",
+                            (self._paciente_id, texto))
+            cur.execute("DELETE FROM menu_imagenes WHERE paciente_id = ?",
+                        (self._paciente_id,))
+            for clave in DIAS_SEMANA_CLAVES:
+                for tiempo, _etiqueta in RECUENTO_COMIDAS:
+                    imagen = (self.men_platillos.get(clave, {}).get(tiempo, {})
+                              or {}).get("imagen")
+                    if not imagen:
+                        continue
+                    cur.execute(
+                        "INSERT INTO menu_imagenes (paciente_id, dia, tiempo, imagen) "
+                        "VALUES (?,?,?,?)",
+                        (self._paciente_id, clave, tiempo, sqlite3.Binary(imagen)))
+            conn.commit()
+            conn.close()
+            self.status.config(text=f"Menú de la semana guardado | Paciente N° {self._paciente_id}")
+            messagebox.showinfo("Guardado", "Menú de la semana guardado")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def _editar_menu_elaboracion(self, silencioso=False):
+        if not getattr(self, "men_trees", None):
+            return
+        if not getattr(self, "_paciente_id", None):
+            if not self._exigir_paciente():
+                return
+        conn = conectar()
+        try:
+            fila = conn.execute(
+                "SELECT menu_json FROM menu WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1", (self._paciente_id,)).fetchone()
+            imagenes = {}
+            for fila_img in conn.execute(
+                    "SELECT dia, tiempo, imagen FROM menu_imagenes "
+                    "WHERE paciente_id = ?", (self._paciente_id,)).fetchall():
+                imagenes[(fila_img[0], fila_img[1])] = fila_img[2]
+        except sqlite3.Error:
+            fila = None
+            imagenes = {}
+        finally:
+            conn.close()
+        if fila is None or not fila[0]:
+            self._limpiar_menu_elaboracion(avisar=False)
+            if not silencioso:
+                messagebox.showinfo("Editar", "No hay menú guardado para este paciente")
+            return
+        try:
+            datos = json.loads(fila[0] or "{}")
+        except (TypeError, ValueError):
+            datos = {}
+        self._iniciar_platillos_sesion()
+        for clave in DIAS_SEMANA_CLAVES:
+            self.men_datos_dias[clave] = datos.get(clave) or {}
+            platillo_por_tiempo = (
+                (self.men_datos_dias[clave].get(MENU_PLATILLOS_CLAVE) or {}))
+            for tiempo, _etiqueta in RECUENTO_COMIDAS:
+                self.men_platillos[clave][tiempo]["platillo"] = (
+                    (platillo_por_tiempo.get(tiempo) or {}).get("platillo", ""))
+                imagen = imagenes.get((clave, tiempo))
+                if imagen:
+                    self.men_platillos[clave][tiempo]["imagen"] = imagen
+        self._cargar_dia_menu(self.men_dia)
+        self.status.config(text=f"Menú cargado | Paciente N° {self._paciente_id}")
+
+    def _limpiar_menu_elaboracion(self, avisar=True):
+        if not getattr(self, "men_trees", None):
+            return
+        for clave in DIAS_SEMANA_CLAVES:
+            self.men_datos_dias[clave] = {}
+        self._iniciar_platillos_sesion()
+        self._cargar_dia_menu(self.men_dia)
+        if avisar:
+            self.status.config(text="Menú limpiado")
+
+    def _imprimir_menu_pdf(self):
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.units import cm
+            from datetime import datetime
+        except Exception:
+            messagebox.showerror(
+                "PDF", "reportlab no está disponible en este equipo.")
+            return
+        if not getattr(self, "_paciente_id", None):
+            if not self._exigir_paciente():
+                return
+        conn = conectar()
+        try:
+            fila_p = conn.execute(
+                "SELECT nombre, dni_hc, fecha_nacimiento, sexo "
+                "FROM paciente WHERE id = ?", (self._paciente_id,)).fetchone()
+        finally:
+            conn.close()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        ruta = filedialog.asksaveasfilename(
+            parent=self, title="Guardar menú en PDF",
+            initialfile="menu_" + ts + ".pdf",
+            defaultextension=".pdf", filetypes=[("Archivo PDF", "*.pdf")])
+        if not ruta:
+            return
+        doc = SimpleDocTemplate(ruta, pagesize=A4, rightMargin=2 * cm,
+                                leftMargin=2 * cm, topMargin=2 * cm,
+                                bottomMargin=2 * cm)
+        styles = getSampleStyleSheet()
+        elements = []
+        elements.append(Paragraph("ELABORACIÓN DE MENÚS — PASO 3 DEL PAN (SMAE-5)",
+                                  styles["Title"]))
+        elements.append(Paragraph(
+            "Menú del " + DIAS_SEMANA_ETIQUETAS.get(self.men_dia, self.men_dia),
+            styles["Heading2"]))
+        elements.append(Spacer(1, 0.3 * cm))
+        datos_paciente = []
+        if fila_p:
+            if fila_p[0]:
+                datos_paciente.append(["Paciente:", fila_p[0]])
+            if fila_p[1]:
+                datos_paciente.append(["DNI/HC:", fila_p[1]])
+            if fila_p[2]:
+                datos_paciente.append(["Fecha de nacimiento:", fila_p[2] or ""])
+            if fila_p[3]:
+                datos_paciente.append(["Sexo:", fila_p[3]])
+        datos_paciente.append(["Fecha/Hora de generación:", fecha_hora])
+        tabla_p = Table(datos_paciente, colWidths=[4 * cm, 11 * cm])
+        tabla_p.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        elements.append(tabla_p)
+        elements.append(Spacer(1, 0.4 * cm))
+        for clave, etiqueta in RECUENTO_COMIDAS:
+            filas_menu = self.men_datos_dias.get(self.men_dia, {}).get(clave, [])
+            platillo = (self.men_platillos.get(self.men_dia, {}).get(clave, {})
+                        or {}).get("platillo", "").strip()
+            titulo_tiempo = etiqueta
+            if platillo:
+                titulo_tiempo += " — " + platillo
+            elements.append(Paragraph(titulo_tiempo, styles["Heading3"]))
+            if not filas_menu:
+                elements.append(Paragraph("Sin alimentos capturados.",
+                                          styles["BodyText"]))
+                elements.append(Spacer(1, 0.2 * cm))
+                continue
+            tabla = [["Alimento", "Grupo", "Eq", "Porción", "kcal",
+                      "Prot (g)", "Lip (g)", "HC (g)", "Fibra (g)"]]
+            for r in filas_menu:
+                eq = r.get("equiv", 0.0)
+                porcion = f"{eq:g}"
+                if str(r.get("cantidad") or "").strip():
+                    porcion += " × " + str(r["cantidad"])
+                    if str(r.get("unidad") or "").strip():
+                        porcion += " " + str(r["unidad"]).strip()
+                tabla.append([
+                    r["alimento"], r["grupo"], f"{eq:g}", porcion,
+                    f"{(r.get('kcal') or 0.0) * eq:.0f}",
+                    f"{(r.get('proteinas_g') or 0.0) * eq:.1f}",
+                    f"{(r.get('lipidos_g') or 0.0) * eq:.1f}",
+                    f"{(r.get('hc_g') or 0.0) * eq:.1f}",
+                    f"{(r.get('fibra_g') or 0.0) * eq:.1f}"])
+            tabla_t = Table(
+                tabla, colWidths=[4.5 * cm, 3 * cm, 1.1 * cm, 3 * cm, 1.3 * cm,
+                                  1.4 * cm, 1.4 * cm, 1.4 * cm, 1.4 * cm])
+            tabla_t.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+            elements.append(tabla_t)
+            elements.append(Spacer(1, 0.3 * cm))
+        try:
+            doc.build(elements)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        self.status.config(text=f"PDF del menú generado | Paciente N° {self._paciente_id}")
+        messagebox.showinfo("PDF", f"Menú guardado en:\n{ruta}")
+
+    def _imprimir_equivalentes_menu_pdf(self):
+        """PDF con el número de equivalentes por grupo y tiempo de comida del día
+        (distribución de la pestaña 9), incluido el balance Falta/Sobra."""
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.units import cm
+            from datetime import datetime
+        except Exception:
+            messagebox.showerror(
+                "PDF", "reportlab no está disponible en este equipo.")
+            return
+        if not getattr(self, "_paciente_id", None):
+            if not self._exigir_paciente():
+                return
+        conn = conectar()
+        try:
+            fila_p = conn.execute(
+                "SELECT nombre, dni_hc, fecha_nacimiento, sexo "
+                "FROM paciente WHERE id = ?", (self._paciente_id,)).fetchone()
+        finally:
+            conn.close()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        ruta = filedialog.asksaveasfilename(
+            parent=self, title="Guardar distribución de equivalentes en PDF",
+            initialfile="equivalentes_" + ts + ".pdf",
+            defaultextension=".pdf", filetypes=[("Archivo PDF", "*.pdf")])
+        if not ruta:
+            return
+        doc = SimpleDocTemplate(ruta, pagesize=A4, rightMargin=1.5 * cm,
+                                leftMargin=1.5 * cm, topMargin=2 * cm,
+                                bottomMargin=2 * cm)
+        styles = getSampleStyleSheet()
+        elements = []
+        elements.append(Paragraph("DISTRIBUCIÓN DE EQUIVALENTES POR GRUPO Y "
+                                  "TIEMPO DE COMIDA",
+                                  styles["Title"]))
+        elements.append(Paragraph(
+            "Del " + DIAS_SEMANA_ETIQUETAS.get(self.men_dia, self.men_dia),
+            styles["Heading2"]))
+        elements.append(Spacer(1, 0.3 * cm))
+        datos_paciente = []
+        if fila_p:
+            if fila_p[0]:
+                datos_paciente.append(["Paciente:", fila_p[0]])
+            if fila_p[1]:
+                datos_paciente.append(["DNI/HC:", fila_p[1]])
+            if fila_p[2]:
+                datos_paciente.append(["Fecha de nacimiento:", fila_p[2] or ""])
+            if fila_p[3]:
+                datos_paciente.append(["Sexo:", fila_p[3]])
+        datos_paciente.append(["Fecha/Hora de generación:", fecha_hora])
+        tabla_p = Table(datos_paciente, colWidths=[4 * cm, 11.5 * cm])
+        tabla_p.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        elements.append(tabla_p)
+        elements.append(Spacer(1, 0.4 * cm))
+
+        acortados = {"colacion_matutina": "Col. matutina",
+                     "colacion_vespertina": "Col. vespertina"}
+        datos = (getattr(self, "eq_datos_dias", None) or {}).get(self.men_dia) or {}
+        encabezado = (["Grupo de alimentos"]
+                      + [acortados.get(clave, etiqueta)
+                         for clave, etiqueta in RECUENTO_COMIDAS]
+                      + ["Total", "Meta", "Falta / Sobra"])
+        tabla = [encabezado]
+        totales_tiempo = dict.fromkeys([c for c, _e in RECUENTO_COMIDAS], 0.0)
+        total_total = 0.0
+        total_meta = 0.0
+        for grupo in self.eq_grupos:
+            capturas = datos.get(grupo) or {}
+            fila = [grupo]
+            suma_tiempos = 0.0
+            for clave, _etiqueta in RECUENTO_COMIDAS:
+                valor = self._numero_equivalentes(capturas.get(clave))
+                suma_tiempos += valor
+                totales_tiempo[clave] += valor
+                fila.append(self._formato_equivalentes(valor))
+            meta = self._menu_total_dia_grupo(grupo, self.men_dia)
+            diferenia = suma_tiempos - meta
+            if meta <= 0 and suma_tiempos <= 0:
+                balance = "—"
+            elif abs(diferenia) < 0.0001:
+                balance = "Completo"
+            elif diferenia < 0:
+                balance = f"Falta {-diferenia:g}"
+            else:
+                balance = f"Sobra +{diferenia:g}"
+            fila += [self._formato_equivalentes(suma_tiempos),
+                     self._formato_equivalentes(meta), balance]
+            total_total += suma_tiempos
+            total_meta += meta
+            tabla.append(fila)
+        fila_total = (["TOTAL DEL DÍA"]
+                      + [self._formato_equivalentes(v)
+                         for v in totales_tiempo.values()]
+                      + [self._formato_equivalentes(total_total),
+                         self._formato_equivalentes(total_meta),
+                         self._formato_equivalentes(total_total - total_meta)])
+        tabla.append(fila_total)
+        tabla_t = Table(tabla, repeatRows=1)
+        tabla_t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        elements.append(tabla_t)
+        elements.append(Spacer(1, 0.3 * cm))
+        elements.append(Paragraph(
+            "Número de equivalentes de cada grupo de alimentos por tiempo de comida. "
+            "«Meta» es el total del día del grupo; «Total» es la suma del día. "
+            "Se toma de la pestaña 9 (Distribución de equivalentes).",
+            styles["BodyText"]))
+        try:
+            doc.build(elements)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        self.status.config(
+            text=f"PDF de equivalentes generado | Paciente N° {self._paciente_id}")
+        messagebox.showinfo("PDF", f"Distribución de equivalentes guardada en:\n{ruta}")
+
     def _tab_lactancia_materna(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="12. Lactancia materna")
+        self.notebook.add(tab, text="13. Lactancia materna")
         interior = ttk.Frame(tab)
         interior.pack(fill="both", expand=True, padx=10, pady=10)
 
         barra_sup = ttk.Frame(interior)
         barra_sup.pack(fill="x", pady=(0, 4))
-        ttk.Label(barra_sup, text="Imprimir el documento:",
+        ttk.Label(barra_sup, text="Documentos PDF:",
                   font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(0, 6))
-        ttk.Button(barra_sup, text="Imprimir PDF",
-                   command=self._imprimir_pdf_lactancia).pack(side="left")
+        ttk.Button(barra_sup, text="Abrir",
+                   command=self._abrir_pdf_seleccionado).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Imprimir",
+                   command=self._imprimir_pdf_seleccionado).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Añadir documento...",
+                   command=self._anadir_documento).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Actualizar lista",
+                   command=self._actualizar_lista_pdfs).pack(side="left", padx=4)
 
-        marco = ttk.LabelFrame(
-            interior, text="Consejos para una lactancia materna exitosa "
-                           "(documento de UNICEF México)")
-        marco.pack(fill="x")
+        marco_docs = ttk.LabelFrame(
+            interior, text="Documentos y vista previa (los PDF de las carpetas del proyecto)")
+        marco_docs.pack(fill="both", expand=True)
 
-        self.lac_text = tk.Text(marco, wrap="word", padx=12, pady=10, height=16,
-                                font=("TkDefaultFont", 10))
-        tsb = ttk.Scrollbar(marco, orient="vertical", command=self.lac_text.yview)
-        self.lac_text.configure(yscrollcommand=tsb.set)
-        self.lac_text.pack(side="left", fill="both", expand=True)
-        tsb.pack(side="right", fill="y")
+        marco_lista = ttk.Frame(marco_docs)
+        marco_lista.pack(side="left", fill="y", padx=(8, 2), pady=8)
+        self.pdf_lista = tk.Listbox(marco_lista, width=58, height=14,
+                                    exportselection=False)
+        self.pdf_lista.pack(side="left", fill="both", expand=True)
+        tsb_lista = ttk.Scrollbar(marco_lista, orient="vertical",
+                                  command=self.pdf_lista.yview)
+        self.pdf_lista.configure(yscrollcommand=tsb_lista.set)
+        tsb_lista.pack(side="right", fill="y")
+        self.pdf_lista.bind("<<ListboxSelect>>", self._mostrar_preview_pdf)
 
-        self.lac_text.tag_configure("titulo", font=("TkDefaultFont", 13, "bold"),
-                                    foreground="#1E6E5C")
-        self.lac_text.tag_configure("seccion", font=("TkDefaultFont", 11, "bold"),
-                                    foreground="#004080", spacing1=8)
-        self.lac_text.tag_configure("sub", font=("TkDefaultFont", 10, "bold"),
-                                    spacing1=4)
-        self.lac_text.tag_configure("bullet", lmargin1=18, lmargin2=18)
-        self.lac_text.tag_configure("norm", lmargin2=2)
-        for estilo, linea in LACTANCIA_MATERNA_CONTENIDO:
-            self.lac_text.insert("end", linea + "\n", estilo)
-        self.lac_text.configure(state="disabled")
+        marco_vista = ttk.LabelFrame(marco_docs, text="Vista previa")
+        marco_vista.pack(side="left", fill="both", expand=True, padx=(2, 8), pady=8)
+        self.pdf_vista = tk.Canvas(marco_vista, bg="white")
+        vsb = ttk.Scrollbar(marco_vista, orient="vertical", command=self.pdf_vista.yview)
+        hsb = ttk.Scrollbar(marco_vista, orient="horizontal", command=self.pdf_vista.xview)
+        self.pdf_vista.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.pdf_vista.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        marco_vista.rowconfigure(0, weight=1)
+        marco_vista.columnconfigure(0, weight=1)
+        self.pdf_imagen = None
+        self.pdf_vista.create_text(10, 10, anchor="nw",
+                                   text="Seleccione un documento de la lista\npara ver "
+                                        "la vista previa de su primera página.",
+                                   fill="#888888", tags=("aviso",))
 
-    def _imprimir_pdf_lactancia(self):
+        self._actualizar_lista_pdfs()
+
+    def _pdfs_de_las_carpetas(self):
         raiz = os.path.dirname(os.path.abspath(__file__))
-        ruta = os.path.join(raiz, "Consejos para una lactancia materna exitosa.pdf")
-        if not os.path.exists(ruta):
-            messagebox.showerror(
-                "Imprimir PDF",
-                "No se encontró el documento:\nConsejos para una lactancia materna exitosa.pdf")
+        pdfs = []
+        try:
+            for nombre in os.listdir(raiz):
+                if nombre.lower().endswith(".pdf"):
+                    ruta = os.path.join(raiz, nombre)
+                    if os.path.isfile(ruta):
+                        pdfs.append((nombre, ruta))
+        except OSError:
+            pass
+        return sorted(set(pdfs))
+
+    def _actualizar_lista_pdfs(self):
+        previo = None
+        sel = self.pdf_lista.curselection()
+        if sel and hasattr(self, "pdfs") and sel[0] < len(self.pdfs):
+            previo = self.pdfs[sel[0]][0]
+        self.pdfs = self._pdfs_de_las_carpetas()
+        self.pdf_lista.delete(0, "end")
+        for nombre, _ruta in self.pdfs:
+            self.pdf_lista.insert("end", nombre)
+        if not self.pdfs:
             return
+        indice = next((i for i, (nombre, _ruta) in enumerate(self.pdfs)
+                       if nombre == previo), 0)
+        self.pdf_lista.selection_set(indice)
+        self.pdf_lista.see(indice)
+        self._mostrar_preview_pdf()
+
+    def _anadir_documento(self):
+        rutas = filedialog.askopenfilenames(
+            parent=self, title="Añadir documento PDF (puede elegir varios)",
+            filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")])
+        if not rutas:
+            return
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        copiados = []
+        errores = []
+        for ruta in rutas:
+            nombre = os.path.basename(ruta)
+            destino = os.path.join(raiz, nombre)
+            if os.path.abspath(ruta) == os.path.abspath(destino):
+                continue
+            try:
+                shutil.copy2(ruta, destino)
+                copiados.append(nombre)
+            except OSError as e:
+                errores.append(f"{nombre}: {e}")
+        if copiados:
+            self._actualizar_lista_pdfs()
+            indice = next((i for i, (nombre, _ruta) in enumerate(self.pdfs)
+                           if nombre == copiados[0]), None)
+            if indice is not None:
+                self.pdf_lista.selection_set(indice)
+                self.pdf_lista.see(indice)
+                self._mostrar_preview_pdf()
+            self.status.config(
+                text=f"Documentos añadidos a {os.path.basename(raiz)}: "
+                     f"{', '.join(copiados)}")
+        mensaje = ""
+        if copiados:
+            mensaje += "Se copiaron a la carpeta del proyecto:\n" + "\n".join(copiados)
+        if errores:
+            mensaje += ("\n\nNo se pudieron copiar:\n" + "\n".join(errores)
+                        if mensaje else "No se pudieron copiar:\n" + "\n".join(errores))
+        if mensaje:
+            messagebox.showinfo("Añadir documento", mensaje)
+
+    def _pdf_seleccionado(self):
+        sel = self.pdf_lista.curselection()
+        if not sel:
+            messagebox.showwarning("PDF", "Seleccione un documento de la lista")
+            return None
+        return self.pdfs[sel[0]]
+
+    def _mostrar_preview_pdf(self, _event=None):
+        sel = self.pdf_lista.curselection()
+        if not sel:
+            return
+        _nombre, ruta = self.pdfs[sel[0]]
+        self.pdf_vista.delete("all")
+        try:
+            import fitz
+        except ImportError:
+            self.pdf_vista.create_text(
+                10, 10, anchor="nw", fill="#888888",
+                text="Vista previa no disponible (falta PyMuPDF).")
+            return
+        try:
+            doc = fitz.open(ruta)
+            pagina = doc[0]
+            pix = pagina.get_pixmap(matrix=fitz.Matrix(1.3, 1.3))
+            datos = pix.tobytes("png")
+            doc.close()
+            self.pdf_imagen = tk.PhotoImage(data=datos)
+            self.pdf_vista.create_image(0, 0, anchor="nw", image=self.pdf_imagen)
+            self.pdf_vista.configure(scrollregion=(0, 0, self.pdf_imagen.width(),
+                                                   self.pdf_imagen.height()))
+            self.pdf_vista.xview_moveto(0)
+            self.pdf_vista.yview_moveto(0)
+        except Exception as e:
+            self.pdf_vista.create_text(
+                10, 10, anchor="nw", fill="#C0392B",
+                text=f"No se pudo previsualizar el documento:\n{e}")
+
+    def _abrir_pdf_seleccionado(self):
+        elegido = self._pdf_seleccionado()
+        if elegido is None:
+            return
+        nombre, ruta = elegido
+        try:
+            os.startfile(ruta)
+            self.status.config(text=f"Documento abierto: {nombre}")
+        except Exception as e:
+            messagebox.showerror("Abrir PDF", str(e))
+
+    def _imprimir_pdf_seleccionado(self):
+        elegido = self._pdf_seleccionado()
+        if elegido is None:
+            return
+        nombre, ruta = elegido
         try:
             os.startfile(ruta)
             messagebox.showinfo(
                 "Imprimir PDF",
-                "Se abrió el documento \"Consejos para una lactancia materna exitosa.pdf\".\n"
-                "En el visor, pulse Imprimir (Ctrl + P) y elija la impresora en el cuadro "
-                "de diálogo.")
-            self.status.config(text="Documento abierto para imprimir | Lactancia materna")
+                f"Se abrió el documento \"{nombre}\".\nEn el visor, pulse Imprimir "
+                "(Ctrl + P) y elija la impresora en el cuadro de diálogo.")
+            self.status.config(text=f"Documento abierto para imprimir: {nombre}")
         except Exception as e:
             messagebox.showerror("Imprimir PDF", str(e))
 
@@ -9631,8 +10653,9 @@ class App(tk.Tk):
         self._editar_distribucion_equivalentes(silencioso=True)
         self._editar_diagnostico_pes(silencioso=True)
         self._cargar_intervencion_pan(silencioso=True)
+        self._editar_menu_elaboracion(silencioso=True)
         self.status.config(
-            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos, equivalentes, diagnóstico nutricio, intervención) | Paciente N° {self._paciente_id}"
+            text=f"Datos del paciente cargados (antecedentes, signos clínicos, fármacos, bioquímica, recuentos, equivalentes, diagnóstico nutricio, intervención, menús) | Paciente N° {self._paciente_id}"
         )
 
 if __name__ == "__main__":
