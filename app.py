@@ -9619,23 +9619,36 @@ class App(tk.Tk):
                    command=self._imprimir_pdf_seleccionado).pack(side="left", padx=4)
         ttk.Button(barra_sup, text="Añadir documento...",
                    command=self._anadir_documento).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Nueva carpeta...",
+                   command=self._nueva_carpeta).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Abrir carpeta",
+                   command=self._abrir_carpeta).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Borrar documento",
+                   command=self._borrar_documento).pack(side="left", padx=4)
+        ttk.Button(barra_sup, text="Borrar carpeta",
+                   command=self._borrar_carpeta).pack(side="left", padx=4)
         ttk.Button(barra_sup, text="Actualizar lista",
                    command=self._actualizar_lista_pdfs).pack(side="left", padx=4)
 
         marco_docs = ttk.LabelFrame(
-            interior, text="Documentos y vista previa (los PDF de las carpetas del proyecto)")
+            interior, text="Documentos y vista previa (doble clic en la carpeta "
+                           "para expandir o contraer)")
         marco_docs.pack(fill="both", expand=True)
 
         marco_lista = ttk.Frame(marco_docs)
         marco_lista.pack(side="left", fill="y", padx=(8, 2), pady=8)
-        self.pdf_lista = tk.Listbox(marco_lista, width=58, height=14,
-                                    exportselection=False)
+        self.pdf_lista = ttk.Treeview(marco_lista, show="tree", selectmode="browse",
+                                      height=14)
+        self.pdf_lista.column("#0", width=380, stretch=True)
         self.pdf_lista.pack(side="left", fill="both", expand=True)
         tsb_lista = ttk.Scrollbar(marco_lista, orient="vertical",
                                   command=self.pdf_lista.yview)
         self.pdf_lista.configure(yscrollcommand=tsb_lista.set)
         tsb_lista.pack(side="right", fill="y")
-        self.pdf_lista.bind("<<ListboxSelect>>", self._mostrar_preview_pdf)
+        self.pdf_lista.bind("<<TreeviewSelect>>", self._mostrar_preview_pdf)
+        self.pdf_lista.bind("<Double-1>", self._alternar_carpeta)
+        self.pdf_lista.bind("<Return>", self._alternar_carpeta)
+        self.pdf_lista.tag_configure("carpeta", foreground="#8B5A00")
 
         marco_vista = ttk.LabelFrame(marco_docs, text="Vista previa")
         marco_vista.pack(side="left", fill="both", expand=True, padx=(2, 8), pady=8)
@@ -9656,35 +9669,184 @@ class App(tk.Tk):
 
         self._actualizar_lista_pdfs()
 
-    def _pdfs_de_las_carpetas(self):
+    def _carpetas_de_documentos(self):
         raiz = os.path.dirname(os.path.abspath(__file__))
-        pdfs = []
+        ignorar = {".venv", "__pycache__", ".mypy_cache", ".git", "data"}
+        carpetas = []
         try:
-            for nombre in os.listdir(raiz):
-                if nombre.lower().endswith(".pdf"):
-                    ruta = os.path.join(raiz, nombre)
-                    if os.path.isfile(ruta):
-                        pdfs.append((nombre, ruta))
+            nombres = sorted(os.listdir(raiz), key=str.lower)
         except OSError:
-            pass
-        return sorted(set(pdfs))
+            return carpetas
+        for nombre in nombres:
+            carpeta = os.path.join(raiz, nombre)
+            if not os.path.isdir(carpeta):
+                continue
+            if nombre.startswith(".") or nombre in ignorar:
+                continue
+            pdfs = []
+            try:
+                for archivo in sorted(os.listdir(carpeta), key=str.lower):
+                    if archivo.lower().endswith(".pdf"):
+                        ruta = os.path.join(carpeta, archivo)
+                        if os.path.isfile(ruta):
+                            pdfs.append((archivo, ruta))
+            except OSError:
+                pass
+            carpetas.append((carpeta, pdfs))
+        return carpetas
 
     def _actualizar_lista_pdfs(self):
-        previo = None
-        sel = self.pdf_lista.curselection()
-        if sel and hasattr(self, "pdfs") and sel[0] < len(self.pdfs):
-            previo = self.pdfs[sel[0]][0]
-        self.pdfs = self._pdfs_de_las_carpetas()
-        self.pdf_lista.delete(0, "end")
-        for nombre, _ruta in self.pdfs:
-            self.pdf_lista.insert("end", nombre)
-        if not self.pdfs:
-            return
-        indice = next((i for i, (nombre, _ruta) in enumerate(self.pdfs)
-                       if nombre == previo), 0)
-        self.pdf_lista.selection_set(indice)
-        self.pdf_lista.see(indice)
+        previo = self._token_seleccionado()
+        abiertas = set()
+        for iid in self.pdf_lista.get_children(""):
+            if self.pdf_lista.item(iid, "open"):
+                abiertas.add(iid)
+        self.pdf_lista.delete(*self.pdf_lista.get_children(""))
+        self.pdf_tokens = {}
+        for num, (carpeta, pdfs) in enumerate(self._carpetas_de_documentos()):
+            iid_carpeta = f"carpeta:{num}"
+            self.pdf_tokens[iid_carpeta] = ("carpeta", carpeta)
+            abierta = True if not abiertas else iid_carpeta in abiertas
+            self.pdf_lista.insert(
+                "", "end", iid=iid_carpeta, open=abierta, tags=("carpeta",),
+                text=" \U0001F4C1  " + os.path.basename(carpeta))
+            for j, (nombre, ruta) in enumerate(pdfs):
+                iid_pdf = f"pdf:{num}:{j}"
+                self.pdf_tokens[iid_pdf] = ("pdf", ruta)
+                self.pdf_lista.insert(
+                    iid_carpeta, "end", iid=iid_pdf, text="     " + nombre)
+        iid_sel = next((iid for iid, t in self.pdf_tokens.items() if t == previo),
+                       None)
+        if iid_sel is None:
+            hijos = self.pdf_lista.get_children("")
+            iid_sel = hijos[0] if hijos else None
+        if iid_sel is not None:
+            self.pdf_lista.selection_set(iid_sel)
+            self.pdf_lista.see(iid_sel)
         self._mostrar_preview_pdf()
+
+    def _token_seleccionado(self):
+        sel = self.pdf_lista.selection()
+        if not sel:
+            return None
+        return getattr(self, "pdf_tokens", {}).get(sel[0])
+
+    def _alternar_carpeta(self, _event=None):
+        sel = self.pdf_lista.selection()
+        if not sel:
+            return
+        token = getattr(self, "pdf_tokens", {}).get(sel[0])
+        if not token or token[0] != "carpeta":
+            return "break"
+        self.pdf_lista.item(sel[0], open=not self.pdf_lista.item(sel[0], "open"))
+        return "break"
+
+    def _carpeta_destino(self):
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        token = self._token_seleccionado()
+        if token and token[0] == "carpeta":
+            return token[1]
+        if token and token[0] == "pdf":
+            return os.path.dirname(token[1])
+        predet = os.path.join(raiz, "Lactancia materna")
+        return predet if os.path.isdir(predet) else raiz
+
+    def _nueva_carpeta(self):
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        nombre = simpledialog.askstring(
+            "Nueva carpeta", "Nombre de la nueva carpeta:", parent=self)
+        if not nombre:
+            return
+        nombre = nombre.strip()
+        if not nombre:
+            return
+        destino = os.path.join(raiz, nombre)
+        if os.path.exists(destino):
+            messagebox.showwarning("Nueva carpeta",
+                                   "Ya existe una carpeta con ese nombre.")
+            return
+        try:
+            os.makedirs(destino)
+        except OSError as e:
+            messagebox.showerror("Nueva carpeta", str(e))
+            return
+        self._actualizar_lista_pdfs()
+        iid = next((iid for iid, t in self.pdf_tokens.items()
+                    if t == ("carpeta", destino)), None)
+        if iid is not None:
+            self.pdf_lista.selection_set(iid)
+            self.pdf_lista.see(iid)
+            self._mostrar_preview_pdf()
+        self.status.config(text=f"Carpeta creada: {nombre}")
+
+    def _abrir_carpeta(self):
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        token = self._token_seleccionado()
+        if token is None:
+            ruta = raiz
+        elif token[0] == "carpeta":
+            ruta = token[1]
+        else:
+            ruta = os.path.dirname(token[1])
+        try:
+            os.startfile(ruta)
+            self.status.config(text=f"Carpeta abierta: {ruta}")
+        except Exception as e:
+            messagebox.showerror("Abrir carpeta", str(e))
+
+    def _borrar_documento(self):
+        token = self._token_seleccionado()
+        if token is None or token[0] != "pdf":
+            messagebox.showwarning(
+                "Borrar documento", "Seleccione un documento PDF de la lista")
+            return
+        ruta = token[1]
+        nombre = os.path.basename(ruta)
+        if not messagebox.askyesno(
+                "Borrar documento",
+                f"¿Desea borrar el documento \"{nombre}\"?\n\n"
+                "Esta acción no se puede deshacer."):
+            return
+        try:
+            os.remove(ruta)
+        except OSError as e:
+            messagebox.showerror("Borrar documento", str(e))
+            return
+        self._actualizar_lista_pdfs()
+        self.status.config(text=f"Documento borrado: {nombre}")
+
+    def _borrar_carpeta(self):
+        token = self._token_seleccionado()
+        if token is None or token[0] != "carpeta":
+            messagebox.showwarning(
+                "Borrar carpeta", "Seleccione una carpeta de la lista")
+            return
+        carpeta = token[1]
+        nombre = os.path.basename(carpeta)
+        try:
+            contenido = os.listdir(carpeta)
+        except OSError as e:
+            messagebox.showerror("Borrar carpeta", str(e))
+            return
+        if contenido:
+            if not messagebox.askyesno(
+                    "Borrar carpeta",
+                    f"La carpeta \"{nombre}\" no está vacía y contiene "
+                    f"{len(contenido)} elemento(s).\n\n"
+                    "¿Desea borrarla junto con todo su contenido?\n"
+                    "Esta acción no se puede deshacer."):
+                return
+        elif not messagebox.askyesno(
+                "Borrar carpeta", f"¿Desea borrar la carpeta \"{nombre}\"?\n\n"
+                "Esta acción no se puede deshacer."):
+            return
+        try:
+            shutil.rmtree(carpeta)
+        except OSError as e:
+            messagebox.showerror("Borrar carpeta", str(e))
+            return
+        self._actualizar_lista_pdfs()
+        self.status.config(text=f"Carpeta borrada: {nombre}")
 
     def _anadir_documento(self):
         rutas = filedialog.askopenfilenames(
@@ -9692,12 +9854,12 @@ class App(tk.Tk):
             filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")])
         if not rutas:
             return
-        raiz = os.path.dirname(os.path.abspath(__file__))
+        carpeta = self._carpeta_destino()
         copiados = []
         errores = []
         for ruta in rutas:
             nombre = os.path.basename(ruta)
-            destino = os.path.join(raiz, nombre)
+            destino = os.path.join(carpeta, nombre)
             if os.path.abspath(ruta) == os.path.abspath(destino):
                 continue
             try:
@@ -9707,18 +9869,20 @@ class App(tk.Tk):
                 errores.append(f"{nombre}: {e}")
         if copiados:
             self._actualizar_lista_pdfs()
-            indice = next((i for i, (nombre, _ruta) in enumerate(self.pdfs)
-                           if nombre == copiados[0]), None)
-            if indice is not None:
-                self.pdf_lista.selection_set(indice)
-                self.pdf_lista.see(indice)
+            objetivo = os.path.join(carpeta, copiados[0])
+            iid = next((iid for iid, t in self.pdf_tokens.items()
+                        if t == ("pdf", objetivo)), None)
+            if iid is not None:
+                self.pdf_lista.selection_set(iid)
+                self.pdf_lista.see(iid)
                 self._mostrar_preview_pdf()
             self.status.config(
-                text=f"Documentos añadidos a {os.path.basename(raiz)}: "
+                text=f"Documentos añadidos a {os.path.basename(carpeta)}: "
                      f"{', '.join(copiados)}")
         mensaje = ""
         if copiados:
-            mensaje += "Se copiaron a la carpeta del proyecto:\n" + "\n".join(copiados)
+            mensaje += ("Se copiaron a la carpeta "
+                        f"'{os.path.basename(carpeta)}':\n" + "\n".join(copiados))
         if errores:
             mensaje += ("\n\nNo se pudieron copiar:\n" + "\n".join(errores)
                         if mensaje else "No se pudieron copiar:\n" + "\n".join(errores))
@@ -9726,25 +9890,40 @@ class App(tk.Tk):
             messagebox.showinfo("Añadir documento", mensaje)
 
     def _pdf_seleccionado(self):
-        sel = self.pdf_lista.curselection()
-        if not sel:
-            messagebox.showwarning("PDF", "Seleccione un documento de la lista")
+        token = self._token_seleccionado()
+        if token is None or token[0] != "pdf":
+            messagebox.showwarning(
+                "PDF", "Seleccione un documento PDF de la lista")
             return None
-        return self.pdfs[sel[0]]
+        ruta = token[1]
+        return (os.path.basename(ruta), ruta)
 
     def _mostrar_preview_pdf(self, _event=None):
-        sel = self.pdf_lista.curselection()
-        if not sel:
-            return
-        _nombre, ruta = self.pdfs[sel[0]]
+        token = self._token_seleccionado()
         self.pdf_vista.delete("all")
-        try:
-            import fitz
-        except ImportError:
+        if token is None:
             self.pdf_vista.create_text(
                 10, 10, anchor="nw", fill="#888888",
-                text="Vista previa no disponible (falta PyMuPDF).")
+                text="Seleccione un documento PDF para ver su vista previa.")
             return
+        if token[0] == "carpeta":
+            self.pdf_vista.create_text(
+                10, 10, anchor="nw", fill="#888888",
+                text=f"Carpeta: {os.path.basename(token[1])}\n\n"
+                     "Seleccione un documento PDF para ver su vista previa.\n"
+                     "Use «Abrir carpeta» para verla en el Explorador.")
+            return
+        ruta = token[1]
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            try:
+                import fitz
+            except ImportError:
+                self.pdf_vista.create_text(
+                    10, 10, anchor="nw", fill="#888888",
+                    text="Vista previa no disponible (falta PyMuPDF).")
+                return
         try:
             doc = fitz.open(ruta)
             pagina = doc[0]
