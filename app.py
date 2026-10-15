@@ -9813,20 +9813,39 @@ class App(tk.Tk):
 
         marco_vista = ttk.LabelFrame(marco_docs, text="Vista previa")
         marco_vista.pack(side="left", fill="both", expand=True, padx=(2, 8), pady=8)
+
+        barra_pag = ttk.Frame(marco_vista)
+        barra_pag.grid(row=0, column=0, columnspan=2, sticky="ew",
+                       padx=4, pady=(4, 2))
+        self.pdf_btn_prev = ttk.Button(barra_pag, text="\u25C0 Anterior", width=11,
+                                       command=self._pdf_pagina_anterior,
+                                       state="disabled")
+        self.pdf_btn_prev.pack(side="left")
+        self.pdf_btn_next = ttk.Button(barra_pag, text="Siguiente \u25B6", width=11,
+                                       command=self._pdf_pagina_siguiente,
+                                       state="disabled")
+        self.pdf_btn_next.pack(side="right")
+        self.pdf_pagina_var = tk.StringVar(value="")
+        ttk.Label(barra_pag, textvariable=self.pdf_pagina_var,
+                  anchor="center").pack(side="left", expand=True, fill="x")
+
         self.pdf_vista = tk.Canvas(marco_vista, bg="white")
         vsb = ttk.Scrollbar(marco_vista, orient="vertical", command=self.pdf_vista.yview)
         hsb = ttk.Scrollbar(marco_vista, orient="horizontal", command=self.pdf_vista.xview)
         self.pdf_vista.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self.pdf_vista.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        marco_vista.rowconfigure(0, weight=1)
+        self.pdf_vista.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        marco_vista.rowconfigure(1, weight=1)
         marco_vista.columnconfigure(0, weight=1)
         self.pdf_imagen = None
+        self.pdf_ruta_actual = None
+        self.pdf_pagina_actual = 0
         self.pdf_vista.create_text(10, 10, anchor="nw",
                                    text="Seleccione un documento de la lista\npara ver "
-                                        "la vista previa de su primera página.",
+                                        "la vista previa de sus páginas.",
                                    fill="#888888", tags=("aviso",))
+        self.pdf_vista.bind("<Control-MouseWheel>", self._pdf_rueda_paginas)
 
         self._actualizar_lista_pdfs()
 
@@ -10062,6 +10081,13 @@ class App(tk.Tk):
     def _mostrar_preview_pdf(self, _event=None):
         token = self._token_seleccionado()
         self.pdf_vista.delete("all")
+        self.pdf_ruta_actual = None
+        self.pdf_pagina_actual = 0
+        if hasattr(self, "pdf_pagina_var"):
+            self.pdf_pagina_var.set("")
+        if hasattr(self, "pdf_btn_prev"):
+            self.pdf_btn_prev.config(state="disabled")
+            self.pdf_btn_next.config(state="disabled")
         if token is None:
             self.pdf_vista.create_text(
                 10, 10, anchor="nw", fill="#888888",
@@ -10085,22 +10111,58 @@ class App(tk.Tk):
                     10, 10, anchor="nw", fill="#888888",
                     text="Vista previa no disponible (falta PyMuPDF).")
                 return
+        self.pdf_ruta_actual = ruta
+        self._render_pagina_pdf()
+
+    def _render_pagina_pdf(self):
+        ruta = getattr(self, "pdf_ruta_actual", None)
+        if not ruta:
+            return
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         try:
             doc = fitz.open(ruta)
-            pagina = doc[0]
+            total = doc.page_count
+            indice = min(max(self.pdf_pagina_actual, 0), total - 1)
+            self.pdf_pagina_actual = indice
+            pagina = doc[indice]
             pix = pagina.get_pixmap(matrix=fitz.Matrix(1.3, 1.3))
             datos = pix.tobytes("png")
             doc.close()
             self.pdf_imagen = tk.PhotoImage(data=datos)
+            self.pdf_vista.delete("all")
             self.pdf_vista.create_image(0, 0, anchor="nw", image=self.pdf_imagen)
             self.pdf_vista.configure(scrollregion=(0, 0, self.pdf_imagen.width(),
                                                    self.pdf_imagen.height()))
             self.pdf_vista.xview_moveto(0)
             self.pdf_vista.yview_moveto(0)
+            self.pdf_pagina_var.set(f"Página {indice + 1} de {total}")
+            self.pdf_btn_prev.config(state=("normal" if indice > 0 else "disabled"))
+            self.pdf_btn_next.config(
+                state=("normal" if indice < total - 1 else "disabled"))
         except Exception as e:
+            self.pdf_vista.delete("all")
             self.pdf_vista.create_text(
                 10, 10, anchor="nw", fill="#C0392B",
                 text=f"No se pudo previsualizar el documento:\n{e}")
+
+    def _pdf_pagina_anterior(self):
+        if self.pdf_pagina_actual > 0:
+            self.pdf_pagina_actual -= 1
+            self._render_pagina_pdf()
+
+    def _pdf_pagina_siguiente(self):
+        self.pdf_pagina_actual += 1
+        self._render_pagina_pdf()
+
+    def _pdf_rueda_paginas(self, event):
+        if event.delta > 0:
+            self._pdf_pagina_anterior()
+        elif event.delta < 0:
+            self._pdf_pagina_siguiente()
+        return "break"
 
     def _abrir_pdf_seleccionado(self):
         elegido = self._pdf_seleccionado()
