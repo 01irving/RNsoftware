@@ -13,6 +13,12 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 from pathlib import Path
 
 try:
+    from PIL import Image, ImageDraw, ImageTk
+    PIL_OK = True
+except ImportError:
+    PIL_OK = False
+
+try:
     import lactmed as _LACTMED
     LACTMED_OK = True
 except ImportError:
@@ -2793,6 +2799,7 @@ class App(tk.Tk):
         self._edit_paciente_id = None
         self._backfill_avisos = []
         self._backfill_huerfanos = 0
+        self._aplicar_tema_bebe()
         self._inicializar_tablas()
         self._crear_notebook()
 
@@ -3306,7 +3313,161 @@ class App(tk.Tk):
             )
         conn.commit()
 
+    # ---------- Tema con motivos de bebé ----------
+    COLOR_FONDO = "#EDF7FB"
+    COLOR_PANEL = "#FFFFFF"
+    COLOR_PRIMARIO = "#7CC6E8"
+    COLOR_PRIMARIO_OSC = "#4FA6CC"
+    COLOR_ROSA = "#FBD8E6"
+    COLOR_MENTA = "#CDEEDD"
+    COLOR_AMARILLO = "#FFF3C4"
+    COLOR_TEXTO = "#3A4A54"
+    COLOR_ENCABEZADO = "#8FD0EC"
+
+    def _aplicar_tema_bebe(self):
+        self.configure(bg=self.COLOR_FONDO)
+        estilo = ttk.Style(self)
+        try:
+            estilo.theme_use("clam")
+        except tk.TclError:
+            pass
+        fuente = "Segoe UI"
+        estilo.configure(".", background=self.COLOR_FONDO,
+                         foreground=self.COLOR_TEXTO, font=(fuente, 10))
+        estilo.configure("TFrame", background=self.COLOR_FONDO)
+        estilo.configure("TLabel", background=self.COLOR_FONDO,
+                         foreground=self.COLOR_TEXTO)
+        estilo.configure("Encabezado.TLabel", background=self.COLOR_ENCABEZADO,
+                         foreground="#FFFFFF", font=(fuente, 16, "bold"))
+        estilo.configure("Sub.TLabel", background=self.COLOR_ENCABEZADO,
+                         foreground="#FFFFFF", font=(fuente, 9))
+        estilo.configure("TButton", background=self.COLOR_PRIMARIO,
+                         foreground="#FFFFFF", borderwidth=0, focusthickness=0,
+                         padding=(10, 6), font=(fuente, 10, "bold"))
+        estilo.map("TButton",
+                   background=[("active", self.COLOR_PRIMARIO_OSC),
+                               ("pressed", self.COLOR_PRIMARIO_OSC),
+                               ("disabled", "#D5E4EB")],
+                   foreground=[("disabled", "#93A5AE")])
+        estilo.configure("TLabelframe", background=self.COLOR_FONDO,
+                         bordercolor=self.COLOR_PRIMARIO, relief="solid",
+                         borderwidth=1)
+        estilo.configure("TLabelframe.Label", background=self.COLOR_FONDO,
+                         foreground=self.COLOR_PRIMARIO_OSC,
+                         font=(fuente, 10, "bold"))
+        estilo.configure("TNotebook", background=self.COLOR_FONDO, borderwidth=0,
+                         tabmargins=(8, 6, 8, 0))
+        estilo.configure("TNotebook.Tab", background=self.COLOR_ROSA,
+                         foreground=self.COLOR_TEXTO, padding=(14, 8),
+                         font=(fuente, 10))
+        estilo.map("TNotebook.Tab",
+                   background=[("selected", self.COLOR_PANEL),
+                               ("active", self.COLOR_AMARILLO)],
+                   foreground=[("selected", self.COLOR_PRIMARIO_OSC)])
+        estilo.configure("Treeview", background=self.COLOR_PANEL,
+                         fieldbackground=self.COLOR_PANEL,
+                         foreground=self.COLOR_TEXTO, rowheight=24,
+                         borderwidth=0)
+        estilo.configure("Treeview.Heading", background=self.COLOR_PRIMARIO,
+                         foreground="#FFFFFF", relief="flat",
+                         font=(fuente, 10, "bold"))
+        estilo.map("Treeview.Heading",
+                   background=[("active", self.COLOR_PRIMARIO_OSC)])
+        estilo.map("Treeview",
+                   background=[("selected", self.COLOR_PRIMARIO)],
+                   foreground=[("selected", "#FFFFFF")])
+        estilo.configure("TCheckbutton", background=self.COLOR_FONDO,
+                         foreground=self.COLOR_TEXTO)
+        estilo.configure("TRadiobutton", background=self.COLOR_FONDO,
+                         foreground=self.COLOR_TEXTO)
+        estilo.configure("TEntry", fieldbackground=self.COLOR_PANEL)
+        estilo.configure("TCombobox", fieldbackground=self.COLOR_PANEL)
+        estilo.configure("Status.TLabel", background=self.COLOR_FONDO,
+                         foreground="#2E7D32", font=(fuente, 9, "bold"))
+
+    def _crear_imagen_bebe(self, tam=52):
+        if not PIL_OK:
+            return None
+        img = Image.new("RGBA", (tam, tam), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        m = tam / 64.0
+
+        def e(x):
+            return x * m
+        d.ellipse([e(12), e(6), e(52), e(38)], fill=(150, 102, 62, 255))
+        d.ellipse([e(8), e(14), e(56), e(62)], fill=(255, 224, 199, 255),
+                  outline=(214, 168, 128, 255), width=max(1, int(m)))
+        d.ellipse([e(13), e(37), e(23), e(47)], fill=(250, 180, 190, 255))
+        d.ellipse([e(41), e(37), e(51), e(47)], fill=(250, 180, 190, 255))
+        d.ellipse([e(22), e(29), e(28), e(37)], fill=(60, 50, 45, 255))
+        d.ellipse([e(36), e(29), e(42), e(37)], fill=(60, 50, 45, 255))
+        d.ellipse([e(24), e(31), e(26), e(33)], fill=(255, 255, 255, 255))
+        d.ellipse([e(38), e(31), e(40), e(33)], fill=(255, 255, 255, 255))
+        d.arc([e(26), e(41), e(38), e(53)], start=20, end=160,
+              fill=(196, 90, 100, 255), width=max(2, int(2 * m)))
+        return ImageTk.PhotoImage(img)
+
+    def _crear_imagen_biberon(self, tam=48):
+        if not PIL_OK:
+            return None
+        img = Image.new("RGBA", (tam, tam), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        m = tam / 48.0
+
+        def e(x):
+            return x * m
+        d.ellipse([e(19), e(2), e(29), e(13)], fill=(250, 200, 120, 255))
+        d.rectangle([e(18), e(11), e(30), e(19)], fill=(255, 255, 255, 255),
+                    outline=(120, 160, 190, 255), width=max(1, int(m)))
+        d.rounded_rectangle([e(15), e(18), e(33), e(46)], radius=e(7),
+                            fill=(255, 255, 255, 255),
+                            outline=(120, 160, 190, 255), width=max(1, int(m)))
+        d.rounded_rectangle([e(17), e(27), e(31), e(44)], radius=e(4),
+                            fill=(255, 244, 214, 255))
+        return ImageTk.PhotoImage(img)
+
+    def _crear_imagen_bebe_cuerpo(self, tam=52):
+        if not PIL_OK:
+            return None
+        img = Image.new("RGBA", (tam, tam), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        m = tam / 64.0
+
+        def e(x):
+            return x * m
+        d.ellipse([e(16), e(6), e(48), e(38)], fill=(255, 224, 199, 255),
+                  outline=(214, 168, 128, 255), width=max(1, int(m)))
+        d.ellipse([e(12), e(36), e(52), e(62)], fill=(205, 238, 221, 255),
+                  outline=(160, 200, 180, 255), width=max(1, int(m)))
+        d.ellipse([e(24), e(18), e(29), e(25)], fill=(60, 50, 45, 255))
+        d.ellipse([e(35), e(18), e(40), e(25)], fill=(60, 50, 45, 255))
+        d.arc([e(26), e(26), e(38), e(36)], start=20, end=160,
+              fill=(196, 90, 100, 255), width=max(2, int(2 * m)))
+        return ImageTk.PhotoImage(img)
+
+    def _crear_encabezado(self):
+        barra = tk.Frame(self, bg=self.COLOR_ENCABEZADO)
+        barra.pack(fill="x")
+        self._img_bebe_izq = self._crear_imagen_bebe_cuerpo(50)
+        self._img_bebe_der = self._crear_imagen_bebe(50)
+        self._img_biberon = self._crear_imagen_biberon(44)
+        if self._img_bebe_izq is not None:
+            tk.Label(barra, image=self._img_bebe_izq,
+                     bg=self.COLOR_ENCABEZADO).pack(side="left",
+                                                    padx=(14, 6), pady=6)
+        ttk.Label(barra, text="Nutrición Pediátrica", style="Encabezado.TLabel"
+                  ).pack(side="left")
+        ttk.Label(barra, text="Historia clínica nutricional · Recién nacido a 2 años",
+                  style="Sub.TLabel").pack(side="left", padx=12)
+        if self._img_biberon is not None:
+            tk.Label(barra, image=self._img_biberon, bg=self.COLOR_ENCABEZADO
+                     ).pack(side="right", padx=(6, 14), pady=6)
+        if self._img_bebe_der is not None:
+            tk.Label(barra, image=self._img_bebe_der, bg=self.COLOR_ENCABEZADO
+                     ).pack(side="right", padx=6, pady=6)
+
     def _crear_notebook(self):
+        self._crear_encabezado()
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
