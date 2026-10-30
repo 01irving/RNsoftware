@@ -374,6 +374,221 @@ RECUENTO_COMIDAS = [
 ]
 RECUENTO_COMIDAS_CLAVES = [c[0] for c in RECUENTO_COMIDAS]
 
+# Criterios AFASS (Aceptabilidad, Factibilidad, Asequibilidad y Seguridad) para
+# la alimentación de sustitución (fórmula). Cada respuesta "Sí" suma 1 punto y
+# está a favor de la fórmula. Fuente: Adegbehingbe SM, Paul-Ebhohimhen V,
+# Marais D. BMC Public Health 2012;12:402 (Tabla 1).
+AFASS_SECCIONES = [
+    ("A. ACEPTABILIDAD — ¿Es aceptable para la madre, su familia y su comunidad?", [
+        "¿Podría mantenerse firme en su elección de alimentación (lactancia "
+        "materna o fórmula) en el hogar, sin doblegarse a las expectativas de "
+        "los demás?",
+        "¿El padre de su hijo(a) u otras personas cercanas a usted conocen su "
+        "estado serológico (VIH)?",
+        "Si elige alimentar con fórmula, ¿se sentiría cómoda dando fórmula "
+        "infantil en público / en la comunidad?",
+    ]),
+    ("B. FACTIBILIDAD — ¿Puede la madre preparar y dar la fórmula en la práctica?", [
+        "¿Puede preparar las tomas y alimentar a su bebé cada 2-4 horas, de día "
+        "y de noche, hasta por tres meses?",
+        "¿Estará en casa durante los primeros seis meses y sin trabajar a "
+        "tiempo completo?",
+        "¿Cuenta con alguien que la ayude en el cuidado de su bebé?",
+        "¿Tiene agua limpia corriente en su casa / parcela o cerca de ella?",
+        "¿Tiene refrigerador en su casa?",
+        "¿Tiene suministro constante de electricidad?",
+        "¿Podría comprar leche de fórmula cada vez que se necesite, dentro de "
+        "su barrio / localidad?",
+    ]),
+    ("C. ASEQUIBILIDAD — ¿Puede pagar la fórmula sin afectar a la familia?", [
+        "¿Puede pagar el costo de la fórmula infantil, los utensilios y el "
+        "combustible de cocción durante al menos seis meses, sin afectar la "
+        "salud y la nutrición de los demás miembros de la familia?",
+        "¿Tiene una fuente de ingresos regular?",
+    ]),
+    ("D. SEGURIDAD — ¿Puede preparar la fórmula de forma higiénica y segura?", [
+        "¿Podría lavarse las manos después de usar el sanitario y antes de "
+        "preparar las tomas, así como lavar y esterilizar todos los utensilios "
+        "necesarios para su preparación?",
+        "¿Tiene letrina con arrastre de agua / inodoro de descarga en su casa?",
+        "¿Tiene fácil acceso a un centro de salud que ofrezca servicios de "
+        "Salud Materno Infantil?",
+    ]),
+]
+AFASS_PREGUNTAS = [p for _titulo, preguntas in AFASS_SECCIONES for p in preguntas]
+AFASS_TOTAL_PREGUNTAS = len(AFASS_PREGUNTAS)  # 15
+
+
+def afass_interpretacion(total_si):
+    """Interpretación del puntaje AFASS según el número de respuestas «Sí»."""
+    if total_si >= 13:
+        return ("SE APRUEBA la alimentación de sustitución (fórmula) como la "
+                "opción de alimentación preferida.", "#1E6E5C")
+    if total_si >= 9:
+        return ("No se aprueba de forma directa: se requiere consejería y "
+                "discusión adicional con la madre para determinar la mejor "
+                "opción.", "#8B5A00")
+    return ("Se recomienda la lactancia materna como la opción de alimentación "
+            "preferida.", "#B00020")
+
+
+def afass_resumen(total_si):
+    """Resumen corto del resultado AFASS para la tabla del historial."""
+    if total_si is None:
+        return ""
+    if total_si >= 13:
+        return "Se aprueba la fórmula"
+    if total_si >= 9:
+        return "Requiere consejería adicional"
+    return "Se recomienda lactancia materna"
+
+
+def generar_pdf_afass(ruta, datos):
+    """Genera el PDF del formulario «Criterios AFASS» lleno con una evaluación.
+
+    ``datos``: diccionario con nombre_madre, fecha, evaluador, servicio,
+    paciente, respuestas (lista con «Sí»/«No»/"" por pregunta) y comunicado.
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                    Table, TableStyle)
+    from reportlab.lib.units import cm
+
+    respuestas = list(datos.get("respuestas") or [])
+    contestadas = sum(1 for r in respuestas if r in ("Sí", "No"))
+    total = sum(1 for r in respuestas if r == "Sí")
+    completa = contestadas == AFASS_TOTAL_PREGUNTAS
+    interpretacion, _color = afass_interpretacion(total)
+
+    doc = SimpleDocTemplate(ruta, pagesize=A4, rightMargin=1.8 * cm,
+                            leftMargin=1.8 * cm, topMargin=1.8 * cm,
+                            bottomMargin=1.8 * cm)
+    estilos = getSampleStyleSheet()
+    celda = ParagraphStyle("celda", parent=estilos["Normal"], fontSize=8.5,
+                           leading=10.5)
+    elementos = []
+    elementos.append(Paragraph("CRITERIOS AFASS", estilos["Title"]))
+    elementos.append(Paragraph(
+        "Alimentación de sustitución (fórmula) — Aceptabilidad, Factibilidad, "
+        "Asequibilidad y Seguridad", estilos["Normal"]))
+    elementos.append(Spacer(1, 0.3 * cm))
+
+    encabezado = [
+        ["Nombre de la madre:", datos.get("nombre_madre") or "-"],
+        ["Paciente:", datos.get("paciente") or "-"],
+        ["Fecha:", datos.get("fecha") or "-"],
+        ["Evaluador(a) / Consejero(a):", datos.get("evaluador") or "-"],
+        ["Servicio / Institución:", datos.get("servicio") or "-"],
+    ]
+    tabla_h = Table(encabezado, colWidths=[5 * cm, 11.9 * cm])
+    tabla_h.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elementos.append(tabla_h)
+    elementos.append(Spacer(1, 0.35 * cm))
+    elementos.append(Paragraph(
+        "Instrucciones: cada respuesta «Sí» suma 1 punto y está a favor de la "
+        "alimentación de sustitución (fórmula). Antes de aplicar esta sección, "
+        "la madre debe comprender los riesgos y beneficios de cada opción de "
+        "alimentación.", celda))
+    elementos.append(Spacer(1, 0.3 * cm))
+
+    numero = 0
+    for titulo, preguntas in AFASS_SECCIONES:
+        elementos.append(Paragraph(titulo, estilos["Heading3"]))
+        filas = [["N.", "Pregunta", "SÍ", "NO"]]
+        for pregunta in preguntas:
+            numero += 1
+            respuesta = (respuestas[numero - 1]
+                         if numero <= len(respuestas) else "")
+            filas.append([str(numero), Paragraph(pregunta, celda),
+                          "X" if respuesta == "Sí" else "",
+                          "X" if respuesta == "No" else ""])
+        tabla_s = Table(filas, colWidths=[0.8 * cm, 11.5 * cm, 1.3 * cm, 1.3 * cm])
+        tabla_s.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elementos.append(tabla_s)
+        elementos.append(Spacer(1, 0.25 * cm))
+
+    tabla_p = Table(
+        [["PUNTUACIÓN: Total de respuestas «Sí»",
+          f"{total} de {AFASS_TOTAL_PREGUNTAS}"]],
+        colWidths=[11.5 * cm, 5.4 * cm])
+    tabla_p.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, 0), (0, 0), colors.lightgrey),
+    ]))
+    elementos.append(tabla_p)
+    if not completa:
+        elementos.append(Spacer(1, 0.2 * cm))
+        elementos.append(Paragraph(
+            f"Formulario incompleto: {AFASS_TOTAL_PREGUNTAS - contestadas} "
+            "pregunta(s) sin contestar.", celda))
+    elementos.append(Spacer(1, 0.4 * cm))
+
+    elementos.append(Paragraph("INTERPRETACIÓN DEL PUNTAJE", estilos["Heading3"]))
+    interpretaciones = [
+        ["Puntos (n.º de «Sí»)", "Resultado / conducta"],
+        ["Más de 12 (13 a 15 SÍ)",
+         "SE APRUEBA la alimentación de sustitución (fórmula) como la opción "
+         "de alimentación preferida."],
+        ["9 a 12 SÍ",
+         "No se aprueba de forma directa: se requiere consejería y discusión "
+         "adicional con la madre para determinar la mejor opción."],
+        ["8 SÍ o menos",
+         "Se recomienda la lactancia materna como la opción de alimentación "
+         "preferida."],
+    ]
+    tabla_i = Table(
+        [[fila[0], Paragraph(fila[1], celda)] for fila in interpretaciones],
+        colWidths=[4 * cm, 12.9 * cm])
+    tabla_i.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elementos.append(tabla_i)
+    elementos.append(Spacer(1, 0.25 * cm))
+    if completa:
+        elementos.append(Paragraph(f"RESULTADO: {interpretacion}", estilos["Normal"]))
+    elementos.append(Spacer(1, 0.5 * cm))
+
+    tabla_f = Table(
+        [["Resultado comunicado a la madre:", datos.get("comunicado") or "-"],
+         ["Firma del evaluador(a):", datos.get("evaluador") or ""]],
+        colWidths=[6 * cm, 10.9 * cm])
+    tabla_f.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (1, 1), (1, 1), 14),
+        ("BOTTOMPADDING", (1, 1), (1, 1), 14),
+    ]))
+    elementos.append(tabla_f)
+    elementos.append(Spacer(1, 0.4 * cm))
+    elementos.append(Paragraph(
+        "Fuente: Adegbehingbe SM, Paul-Ebhohimhen V, Marais D. Development of "
+        "an AFASS assessment and screening tool towards the prevention of "
+        "mother-to-child HIV transmission (PMTCT) in sub-Saharan Africa — A "
+        "Delphi survey. BMC Public Health 2012;12:402 (Tabla 1).", celda))
+    doc.build(elementos)
+
 # Pestaña Elaboración de menús: nombre del platillo y foto por tiempo de comida
 # (se guardan por día; la imagen va en la tabla menu_imagenes).
 MENU_PLATILLOS_CLAVE = "_platillos"
@@ -2790,11 +3005,959 @@ def _signo(valor):
     return "+" if valor >= 0 else "−"
 
 
+class NotebookDosFilas(ttk.Frame):
+    """Notebook con las pestañas repartidas en dos filas de botones.
+
+    ttk.Notebook solo admite una fila de pestañas y con 15 pestañas estas se
+    comprimen. Esta clase imita la interfaz que usa la aplicación (add, tabs,
+    tab, select y el evento virtual <<NotebookTabChanged>>) repartiendo las
+    pestañas en dos filas: las primeras ``por_fila`` en la fila de arriba y el
+    resto en la fila de abajo."""
+
+    def __init__(self, master, por_fila=8, **kw):
+        super().__init__(master, **kw)
+        self.por_fila = por_fila
+        self._fichas = []          # [(widget_contenido, boton)]
+        self._seleccion = None
+        self.filas = (ttk.Frame(self), ttk.Frame(self))
+        for fila in self.filas:
+            fila.pack(fill="x")
+        ttk.Separator(self, orient="horizontal").pack(fill="x")
+        self.area = ttk.Frame(self)
+        self.area.pack(fill="both", expand=True)
+
+    def add(self, child, text=""):
+        indice = len(self._fichas)
+        fila = self.filas[0] if indice < self.por_fila else self.filas[1]
+        boton = ttk.Button(
+            fila, text=text, style="Ficha.TButton",
+            command=lambda c=child: self.select(c))
+        boton.pack(side="left", padx=(2, 2), pady=2)
+        self._fichas.append((child, boton))
+        if self._seleccion is None:
+            self._elegir(child)
+
+    def tabs(self):
+        return [widget for widget, _boton in self._fichas]
+
+    def tab(self, objetivo, option=None):
+        """Consulta (o cambia) el texto de una pestaña, como ttk.Notebook."""
+        boton = self._boton_de(objetivo)
+        if boton is None:
+            return ""
+        if option is None or option == "text":
+            return boton.cget("text")
+        if isinstance(option, str) and "=" not in option:
+            return ""
+        nuevo = option.split("=", 1)[1] if isinstance(option, str) else None
+        if nuevo:
+            boton.configure(text=nuevo)
+        return None
+
+    def select(self, objetivo=None):
+        if objetivo is None:
+            return str(self._seleccion) if self._seleccion is not None else ""
+        for widget, _boton in self._fichas:
+            if widget is objetivo or str(widget) == str(objetivo):
+                self._elegir(widget)
+                return
+        if isinstance(objetivo, int) and 0 <= objetivo < len(self._fichas):
+            self._elegir(self._fichas[objetivo][0])
+
+    def _boton_de(self, objetivo):
+        for widget, boton in self._fichas:
+            if widget is objetivo or str(widget) == str(objetivo):
+                return boton
+        return None
+
+    def _elegir(self, child):
+        cambio = self._seleccion is not child
+        if self._seleccion is not None:
+            self._seleccion.pack_forget()
+        self._seleccion = child
+        child.pack(in_=self.area, fill="both", expand=True)
+        for widget, boton in self._fichas:
+            boton.configure(
+                style=("FichaActiva.TButton" if widget is child
+                       else "Ficha.TButton"))
+        if cambio:
+            self.event_generate("<<NotebookTabChanged>>")
+
+
+class GestorDocumentosPDF(ttk.Frame):
+    """Gestor de documentos PDF con árbol de carpetas y vista previa.
+
+    Si ``raiz`` es None se listan las carpetas de documentos del directorio de
+    la aplicación (pestaña Lactancia materna). Si se indica ``raiz``, el gestor
+    queda delimitado a esa carpeta: se muestran sus PDF directos y sus
+    subcarpetas (pestaña Fórmula). ``excluir`` añade nombres de carpetas que no
+    deben listarse en el nivel superior."""
+
+    _IGNORAR = {".venv", "__pycache__", ".mypy_cache", ".git", "data"}
+
+    def __init__(self, app, master, raiz=None, excluir=None, alto_arbol=14):
+        super().__init__(master)
+        self.app = app
+        self.raiz = os.path.abspath(raiz) if raiz else None
+        self.excluir = set(excluir or ())
+        self._construir(alto_arbol)
+        self.actualizar_lista()
+
+    # ---------- construcción de la interfaz ----------
+    def _construir(self, alto_arbol):
+        self.barra_sup = ttk.Frame(self)
+        self.barra_sup.pack(fill="x", pady=(0, 4))
+        ttk.Label(self.barra_sup, text="Documentos PDF:",
+                  font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(0, 6))
+        ttk.Button(self.barra_sup, text="Abrir",
+                   command=self.abrir_seleccionado).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Imprimir",
+                   command=self.imprimir_seleccionado).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Añadir documento...",
+                   command=self.anadir_documento).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Nueva carpeta...",
+                   command=self.nueva_carpeta).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Abrir carpeta",
+                   command=self.abrir_carpeta).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Borrar documento",
+                   command=self.borrar_documento).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Borrar carpeta",
+                   command=self.borrar_carpeta).pack(side="left", padx=4)
+        ttk.Button(self.barra_sup, text="Actualizar lista",
+                   command=self.actualizar_lista).pack(side="left", padx=4)
+
+        marco_docs = ttk.LabelFrame(
+            self, text="Documentos y vista previa (doble clic en la carpeta "
+                       "para expandir o contraer)")
+        marco_docs.pack(fill="both", expand=True)
+
+        marco_lista = ttk.Frame(marco_docs)
+        marco_lista.pack(side="left", fill="y", padx=(8, 2), pady=8)
+        self.lista = ttk.Treeview(marco_lista, show="tree", selectmode="browse",
+                                  height=alto_arbol)
+        self.lista.column("#0", width=380, stretch=True)
+        self.lista.pack(side="left", fill="both", expand=True)
+        tsb_lista = ttk.Scrollbar(marco_lista, orient="vertical",
+                                  command=self.lista.yview)
+        self.lista.configure(yscrollcommand=tsb_lista.set)
+        tsb_lista.pack(side="right", fill="y")
+        self.lista.bind("<<TreeviewSelect>>", self.mostrar_preview)
+        self.lista.bind("<Double-1>", self.alternar_carpeta)
+        self.lista.bind("<Return>", self.alternar_carpeta)
+        self.lista.tag_configure("carpeta", foreground="#8B5A00")
+
+        marco_vista = ttk.LabelFrame(marco_docs, text="Vista previa")
+        marco_vista.pack(side="left", fill="both", expand=True, padx=(2, 8), pady=8)
+
+        barra_pag = ttk.Frame(marco_vista)
+        barra_pag.grid(row=0, column=0, columnspan=2, sticky="ew",
+                       padx=4, pady=(4, 2))
+        self.btn_prev = ttk.Button(barra_pag, text="\u25C0 Anterior", width=11,
+                                   command=self.pagina_anterior, state="disabled")
+        self.btn_prev.pack(side="left")
+        self.btn_next = ttk.Button(barra_pag, text="Siguiente \u25B6", width=11,
+                                   command=self.pagina_siguiente, state="disabled")
+        self.btn_next.pack(side="right")
+        self.pagina_var = tk.StringVar(value="")
+        ttk.Label(barra_pag, textvariable=self.pagina_var,
+                  anchor="center").pack(side="left", expand=True, fill="x")
+
+        self.vista = tk.Canvas(marco_vista, bg="white")
+        vsb = ttk.Scrollbar(marco_vista, orient="vertical", command=self.vista.yview)
+        hsb = ttk.Scrollbar(marco_vista, orient="horizontal", command=self.vista.xview)
+        self.vista.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.vista.grid(row=1, column=0, sticky="nsew")
+        vsb.grid(row=1, column=1, sticky="ns")
+        hsb.grid(row=2, column=0, sticky="ew")
+        marco_vista.rowconfigure(1, weight=1)
+        marco_vista.columnconfigure(0, weight=1)
+        self.imagen = None
+        self.ruta_actual = None
+        self.pagina_actual = 0
+        self.vista.create_text(10, 10, anchor="nw",
+                               text="Seleccione un documento de la lista\npara ver "
+                                    "la vista previa de sus páginas.",
+                               fill="#888888", tags=("aviso",))
+        self.vista.bind("<Control-MouseWheel>", self._rueda_paginas)
+
+    def agregar_boton(self, texto, comando, lado="right"):
+        """Añade un botón extra a la barra superior del gestor."""
+        btn = ttk.Button(self.barra_sup, text=texto, command=comando)
+        if lado == "right":
+            btn.pack(side="right", padx=4)
+        else:
+            btn.pack(side="left", padx=4)
+        return btn
+
+    # ---------- exploración de carpetas ----------
+    def _dir_base(self):
+        return self.raiz or os.path.dirname(os.path.abspath(__file__))
+
+    def _carpeta_predeterminada(self):
+        predet = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "Lactancia materna")
+        if self.raiz:
+            return self.raiz
+        return predet if os.path.isdir(predet) else self._dir_base()
+
+    def _pdfs_de(self, carpeta):
+        pdfs = []
+        try:
+            for archivo in sorted(os.listdir(carpeta), key=str.lower):
+                if archivo.lower().endswith(".pdf"):
+                    ruta = os.path.join(carpeta, archivo)
+                    if os.path.isfile(ruta):
+                        pdfs.append((archivo, ruta))
+        except OSError:
+            pass
+        return pdfs
+
+    def _carpetas_de_documentos(self):
+        base = self._dir_base()
+        carpetas = []
+        if self.raiz:
+            # Gestor delimitado: la carpeta raíz con sus PDF directos y luego
+            # cada subcarpeta con los suyos.
+            if os.path.isdir(base):
+                carpetas.append((base, self._pdfs_de(base)))
+            try:
+                nombres = sorted(os.listdir(base), key=str.lower)
+            except OSError:
+                nombres = []
+            for nombre in nombres:
+                if nombre.startswith(".") or nombre in self._IGNORAR:
+                    continue
+                carpeta = os.path.join(base, nombre)
+                if os.path.isdir(carpeta):
+                    carpetas.append((carpeta, self._pdfs_de(carpeta)))
+            return carpetas
+        ignorar = self._IGNORAR | self.excluir
+        try:
+            nombres = sorted(os.listdir(base), key=str.lower)
+        except OSError:
+            return carpetas
+        for nombre in nombres:
+            carpeta = os.path.join(base, nombre)
+            if not os.path.isdir(carpeta):
+                continue
+            if nombre.startswith(".") or nombre in ignorar:
+                continue
+            carpetas.append((carpeta, self._pdfs_de(carpeta)))
+        return carpetas
+
+    # ---------- lista y selección ----------
+    def actualizar_lista(self):
+        previo = self._token_seleccionado()
+        abiertas = set()
+        for iid in self.lista.get_children(""):
+            if self.lista.item(iid, "open"):
+                abiertas.add(iid)
+        self.lista.delete(*self.lista.get_children(""))
+        self.tokens = {}
+        for num, (carpeta, pdfs) in enumerate(self._carpetas_de_documentos()):
+            iid_carpeta = f"carpeta:{num}"
+            self.tokens[iid_carpeta] = ("carpeta", carpeta)
+            abierta = True if not abiertas else iid_carpeta in abiertas
+            self.lista.insert(
+                "", "end", iid=iid_carpeta, open=abierta, tags=("carpeta",),
+                text=" \U0001F4C1  " + os.path.basename(carpeta))
+            for j, (nombre, ruta) in enumerate(pdfs):
+                iid_pdf = f"pdf:{num}:{j}"
+                self.tokens[iid_pdf] = ("pdf", ruta)
+                self.lista.insert(
+                    iid_carpeta, "end", iid=iid_pdf, text="     " + nombre)
+        iid_sel = next((iid for iid, t in self.tokens.items() if t == previo),
+                       None)
+        if iid_sel is None:
+            hijos = self.lista.get_children("")
+            iid_sel = hijos[0] if hijos else None
+        if iid_sel is not None:
+            self.lista.selection_set(iid_sel)
+            self.lista.see(iid_sel)
+        self.mostrar_preview()
+
+    def _token_seleccionado(self):
+        sel = self.lista.selection()
+        if not sel:
+            return None
+        return getattr(self, "tokens", {}).get(sel[0])
+
+    def alternar_carpeta(self, _event=None):
+        sel = self.lista.selection()
+        if not sel:
+            return
+        token = getattr(self, "tokens", {}).get(sel[0])
+        if not token or token[0] != "carpeta":
+            return "break"
+        self.lista.item(sel[0], open=not self.lista.item(sel[0], "open"))
+        return "break"
+
+    def _carpeta_destino(self):
+        token = self._token_seleccionado()
+        if token and token[0] == "carpeta":
+            return token[1]
+        if token and token[0] == "pdf":
+            return os.path.dirname(token[1])
+        return self._carpeta_predeterminada()
+
+    def _seleccionar_token(self, token):
+        iid = next((i for i, t in getattr(self, "tokens", {}).items()
+                    if t == token), None)
+        if iid is not None:
+            self.lista.selection_set(iid)
+            self.lista.see(iid)
+            self.mostrar_preview()
+
+    def _estado(self, texto):
+        if getattr(self.app, "status", None) is not None:
+            self.app.status.config(text=texto)
+
+    # ---------- operaciones de carpetas y documentos ----------
+    def nueva_carpeta(self):
+        nombre = simpledialog.askstring(
+            "Nueva carpeta", "Nombre de la nueva carpeta:", parent=self.app)
+        if not nombre or not nombre.strip():
+            return
+        nombre = nombre.strip()
+        destino = os.path.join(self._dir_base(), nombre)
+        if os.path.exists(destino):
+            messagebox.showwarning("Nueva carpeta",
+                                   "Ya existe una carpeta con ese nombre.")
+            return
+        try:
+            os.makedirs(destino)
+        except OSError as e:
+            messagebox.showerror("Nueva carpeta", str(e))
+            return
+        self.actualizar_lista()
+        self._seleccionar_token(("carpeta", destino))
+        self._estado(f"Carpeta creada: {nombre}")
+
+    def abrir_carpeta(self):
+        token = self._token_seleccionado()
+        if token is None:
+            ruta = self._dir_base()
+        elif token[0] == "carpeta":
+            ruta = token[1]
+        else:
+            ruta = os.path.dirname(token[1])
+        try:
+            os.startfile(ruta)
+            self._estado(f"Carpeta abierta: {ruta}")
+        except Exception as e:
+            messagebox.showerror("Abrir carpeta", str(e))
+
+    def borrar_documento(self):
+        token = self._token_seleccionado()
+        if token is None or token[0] != "pdf":
+            messagebox.showwarning(
+                "Borrar documento", "Seleccione un documento PDF de la lista")
+            return
+        ruta = token[1]
+        nombre = os.path.basename(ruta)
+        if not messagebox.askyesno(
+                "Borrar documento",
+                f"¿Desea borrar el documento \"{nombre}\"?\n\n"
+                "Esta acción no se puede deshacer."):
+            return
+        try:
+            os.remove(ruta)
+        except OSError as e:
+            messagebox.showerror("Borrar documento", str(e))
+            return
+        self.actualizar_lista()
+        self._estado(f"Documento borrado: {nombre}")
+
+    def borrar_carpeta(self):
+        token = self._token_seleccionado()
+        if token is None or token[0] != "carpeta":
+            messagebox.showwarning(
+                "Borrar carpeta", "Seleccione una carpeta de la lista")
+            return
+        carpeta = token[1]
+        if self.raiz and os.path.abspath(carpeta) == self.raiz:
+            messagebox.showwarning(
+                "Borrar carpeta",
+                "La carpeta raíz del gestor no se puede borrar.\n"
+                "Puede borrar sus subcarpetas o documentos individuales.")
+            return
+        nombre = os.path.basename(carpeta)
+        try:
+            contenido = os.listdir(carpeta)
+        except OSError as e:
+            messagebox.showerror("Borrar carpeta", str(e))
+            return
+        if contenido:
+            if not messagebox.askyesno(
+                    "Borrar carpeta",
+                    f"La carpeta \"{nombre}\" no está vacía y contiene "
+                    f"{len(contenido)} elemento(s).\n\n"
+                    "¿Desea borrarla junto con todo su contenido?\n"
+                    "Esta acción no se puede deshacer."):
+                return
+        elif not messagebox.askyesno(
+                "Borrar carpeta", f"¿Desea borrar la carpeta \"{nombre}\"?\n\n"
+                "Esta acción no se puede deshacer."):
+            return
+        try:
+            shutil.rmtree(carpeta)
+        except OSError as e:
+            messagebox.showerror("Borrar carpeta", str(e))
+            return
+        self.actualizar_lista()
+        self._estado(f"Carpeta borrada: {nombre}")
+
+    def anadir_documento(self):
+        rutas = filedialog.askopenfilenames(
+            parent=self.app, title="Añadir documento PDF (puede elegir varios)",
+            filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")])
+        if not rutas:
+            return
+        carpeta = self._carpeta_destino()
+        copiados = []
+        errores = []
+        for ruta in rutas:
+            nombre = os.path.basename(ruta)
+            destino = os.path.join(carpeta, nombre)
+            if os.path.abspath(ruta) == os.path.abspath(destino):
+                continue
+            try:
+                shutil.copy2(ruta, destino)
+                copiados.append(nombre)
+            except OSError as e:
+                errores.append(f"{nombre}: {e}")
+        if copiados:
+            self.actualizar_lista()
+            self._seleccionar_token(("pdf", os.path.join(carpeta, copiados[0])))
+            self._estado(
+                f"Documentos añadidos a {os.path.basename(carpeta)}: "
+                f"{', '.join(copiados)}")
+        mensaje = ""
+        if copiados:
+            mensaje += ("Se copiaron a la carpeta "
+                        f"'{os.path.basename(carpeta)}':\n" + "\n".join(copiados))
+        if errores:
+            mensaje += ("\n\nNo se pudieron copiar:\n" + "\n".join(errores)
+                        if mensaje else "No se pudieron copiar:\n" + "\n".join(errores))
+        if mensaje:
+            messagebox.showinfo("Añadir documento", mensaje)
+
+    # ---------- vista previa ----------
+    def _pdf_seleccionado(self):
+        token = self._token_seleccionado()
+        if token is None or token[0] != "pdf":
+            messagebox.showwarning(
+                "PDF", "Seleccione un documento PDF de la lista")
+            return None
+        ruta = token[1]
+        return (os.path.basename(ruta), ruta)
+
+    def mostrar_preview(self, _event=None):
+        token = self._token_seleccionado()
+        self.vista.delete("all")
+        self.ruta_actual = None
+        self.pagina_actual = 0
+        self.pagina_var.set("")
+        self.btn_prev.config(state="disabled")
+        self.btn_next.config(state="disabled")
+        if token is None:
+            self.vista.create_text(
+                10, 10, anchor="nw", fill="#888888",
+                text="Seleccione un documento PDF para ver su vista previa.")
+            return
+        if token[0] == "carpeta":
+            self.vista.create_text(
+                10, 10, anchor="nw", fill="#888888",
+                text=f"Carpeta: {os.path.basename(token[1])}\n\n"
+                     "Seleccione un documento PDF para ver su vista previa.\n"
+                     "Use «Abrir carpeta» para verla en el Explorador.")
+            return
+        self.ruta_actual = token[1]
+        self._render_pagina()
+
+    def _render_pagina(self):
+        ruta = getattr(self, "ruta_actual", None)
+        if not ruta:
+            return
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            try:
+                import fitz
+            except ImportError:
+                self.vista.delete("all")
+                self.vista.create_text(
+                    10, 10, anchor="nw", fill="#888888",
+                    text="Vista previa no disponible (falta PyMuPDF).")
+                return
+        try:
+            doc = fitz.open(ruta)
+            total = doc.page_count
+            indice = min(max(self.pagina_actual, 0), total - 1)
+            self.pagina_actual = indice
+            pagina = doc[indice]
+            pix = pagina.get_pixmap(matrix=fitz.Matrix(1.3, 1.3))
+            datos = pix.tobytes("png")
+            doc.close()
+            self.imagen = tk.PhotoImage(data=datos)
+            self.vista.delete("all")
+            self.vista.create_image(0, 0, anchor="nw", image=self.imagen)
+            self.vista.configure(scrollregion=(0, 0, self.imagen.width(),
+                                               self.imagen.height()))
+            self.vista.xview_moveto(0)
+            self.vista.yview_moveto(0)
+            self.pagina_var.set(f"Página {indice + 1} de {total}")
+            self.btn_prev.config(state=("normal" if indice > 0 else "disabled"))
+            self.btn_next.config(
+                state=("normal" if indice < total - 1 else "disabled"))
+        except Exception as e:
+            self.vista.delete("all")
+            self.vista.create_text(
+                10, 10, anchor="nw", fill="#C0392B",
+                text=f"No se pudo previsualizar el documento:\n{e}")
+
+    def pagina_anterior(self):
+        if self.pagina_actual > 0:
+            self.pagina_actual -= 1
+            self._render_pagina()
+
+    def pagina_siguiente(self):
+        self.pagina_actual += 1
+        self._render_pagina()
+
+    def _rueda_paginas(self, event):
+        if event.delta > 0:
+            self.pagina_anterior()
+        elif event.delta < 0:
+            self.pagina_siguiente()
+        return "break"
+
+    # ---------- abrir e imprimir ----------
+    def abrir_seleccionado(self):
+        elegido = self._pdf_seleccionado()
+        if elegido is None:
+            return
+        nombre, ruta = elegido
+        try:
+            os.startfile(ruta)
+            self._estado(f"Documento abierto: {nombre}")
+        except Exception as e:
+            messagebox.showerror("Abrir PDF", str(e))
+
+    def imprimir_seleccionado(self):
+        elegido = self._pdf_seleccionado()
+        if elegido is None:
+            return
+        nombre, ruta = elegido
+        try:
+            os.startfile(ruta)
+            messagebox.showinfo(
+                "Imprimir PDF",
+                f"Se abrió el documento \"{nombre}\".\nEn el visor, pulse Imprimir "
+                "(Ctrl + P) y elija la impresora en el cuadro de diálogo.")
+            self._estado(f"Documento abierto para imprimir: {nombre}")
+        except Exception as e:
+            messagebox.showerror("Imprimir PDF", str(e))
+
+
+class FormularioAFASS(ttk.Frame):
+    """Formulario de los criterios AFASS (Aceptabilidad, Factibilidad,
+    Asequibilidad y Seguridad) para decidir la alimentación de sustitución
+    (fórmula). Se despliega dentro de la pestaña Fórmula: 15 preguntas con
+    selector SÍ/NO, conteo automático, interpretación del resultado y guardado
+    por paciente en la base de datos."""
+
+    def __init__(self, app, master):
+        super().__init__(master)
+        self.app = app
+        self.registro_id = None
+        self.paciente_id = None
+        self._construir()
+        self.bind("<MouseWheel>", self._rueda)
+
+    def al_mostrar(self):
+        """Prepara el formulario al desplegarlo: campos limpios y última
+        evaluación guardada del paciente activo (si existe)."""
+        self.paciente_id = getattr(self.app, "_paciente_id", None)
+        self._limpiar_campos()
+        self._cargar_guardado()
+        self._recalcular()
+
+    # ---------- construcción ----------
+    def _construir(self):
+        encabezado = ttk.Frame(self)
+        encabezado.pack(fill="x", pady=(6, 4))
+        ttk.Label(encabezado, text="CRITERIOS AFASS",
+                  font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
+        ttk.Label(
+            encabezado,
+            text="Instrucciones: pregunte y marque SÍ o NO en cada criterio junto "
+                 "con la madre. Cada respuesta «Sí» suma 1 punto y está a favor de "
+                 "la alimentación de sustitución (fórmula). Antes de aplicar esta "
+                 "sección, la madre debe comprender los riesgos y beneficios de "
+                 "cada opción de alimentación.",
+            wraplength=900, justify="left", foreground="#444444"
+        ).pack(anchor="w", pady=(2, 6))
+
+        datos = ttk.Frame(encabezado)
+        datos.pack(fill="x")
+        self.var_madre = tk.StringVar()
+        self.var_fecha = tk.StringVar(value=date.today().isoformat())
+        self.var_evaluador = tk.StringVar()
+        self.var_servicio = tk.StringVar()
+        for col, (etiqueta, variable, ancho) in enumerate([
+                ("Nombre de la madre:", self.var_madre, 34),
+                ("Fecha:", self.var_fecha, 12),
+                ("Evaluador(a) / Consejero(a):", self.var_evaluador, 24),
+                ("Servicio / Institución:", self.var_servicio, 22)]):
+            ttk.Label(datos, text=etiqueta).grid(
+                row=col // 2, column=(col % 2) * 2, sticky="w", padx=(0, 4),
+                pady=2)
+            ttk.Entry(datos, textvariable=variable, width=ancho).grid(
+                row=col // 2, column=(col % 2) * 2 + 1, sticky="we",
+                padx=(0, 14), pady=2)
+        datos.columnconfigure(1, weight=1)
+        datos.columnconfigure(3, weight=1)
+
+        # Zona central con scroll: las secciones con las 15 preguntas.
+        marco_scroll = ttk.Frame(self)
+        marco_scroll.pack(fill="both", expand=True, pady=4)
+        self.canvas = tk.Canvas(marco_scroll, highlightthickness=0)
+        vsb = ttk.Scrollbar(marco_scroll, orient="vertical",
+                            command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=vsb.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        self.contenido = ttk.Frame(self.canvas)
+        self._ventana_canvas = self.canvas.create_window(
+            (0, 0), window=self.contenido, anchor="nw")
+        self.contenido.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(
+                scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfigure(
+                self._ventana_canvas, width=e.width))
+
+        self.resp_vars = []
+        numero = 0
+        for titulo, preguntas in AFASS_SECCIONES:
+            seccion = ttk.LabelFrame(self.contenido, text=titulo)
+            seccion.pack(fill="x", pady=(6, 2))
+            ttk.Label(seccion, text="N.", width=3, anchor="w",
+                      font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=0, sticky="w", padx=(8, 4), pady=(6, 2))
+            ttk.Label(seccion, text="Pregunta", anchor="w",
+                      font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=1, sticky="w", pady=(6, 2))
+            ttk.Label(seccion, text="SÍ", width=4, anchor="center",
+                      font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=2, padx=8, pady=(6, 2))
+            ttk.Label(seccion, text="NO", width=4, anchor="center",
+                      font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=3, padx=(4, 8), pady=(6, 2))
+            seccion.columnconfigure(1, weight=1)
+            for pregunta in preguntas:
+                numero += 1
+                fila = numero
+                ttk.Label(seccion, text=str(numero), width=3,
+                          anchor="nw").grid(
+                    row=fila, column=0, sticky="nw", padx=(8, 4), pady=4)
+                ttk.Label(seccion, text=pregunta, wraplength=640,
+                          justify="left", anchor="w").grid(
+                    row=fila, column=1, sticky="w", pady=4)
+                variable = tk.StringVar(value="")
+                self.resp_vars.append(variable)
+                for columna, valor in ((2, "Sí"), (3, "No")):
+                    ttk.Radiobutton(
+                        seccion, text=valor, value=valor, variable=variable,
+                        command=self._recalcular).grid(
+                        row=fila, column=columna, padx=8, pady=4)
+
+        # Interpretación de referencia (como en el formulario PDF).
+        referencia = ttk.LabelFrame(
+            self.contenido, text="Interpretación del puntaje")
+        referencia.pack(fill="x", pady=(8, 2))
+        for texto in (
+            "Más de 12 (13 a 15 SÍ): SE APRUEBA la alimentación de sustitución "
+            "(fórmula) como la opción de alimentación preferida.",
+            "9 a 12 SÍ: No se aprueba de forma directa: se requiere consejería y "
+            "discusión adicional con la madre para determinar la mejor opción.",
+            "8 SÍ o menos: Se recomienda la lactancia materna como la opción de "
+            "alimentación preferida.",
+        ):
+            ttk.Label(referencia, text=texto, wraplength=860,
+                      justify="left", anchor="w").pack(
+                fill="x", padx=8, pady=1)
+        ttk.Label(
+            referencia,
+            text="Fuente: Adegbehingbe SM, Paul-Ebhohimhen V, Marais D. "
+                 "Development of an AFASS assessment and screening tool towards "
+                 "the prevention of mother-to-child HIV transmission (PMTCT) in "
+                 "sub-Saharan Africa — A Delphi survey. BMC Public Health "
+                 "2012;12:402 (Tabla 1).",
+            wraplength=860, justify="left", foreground="#777777").pack(
+            fill="x", padx=8, pady=(2, 6))
+
+        # Pie: puntuación, comunicado, firma y botones (siempre visibles).
+        pie = ttk.Frame(self)
+        pie.pack(fill="x", pady=(4, 6))
+        self.etiqueta_total = ttk.Label(
+            pie, text="", font=("TkDefaultFont", 10, "bold"))
+        self.etiqueta_total.pack(anchor="w")
+        self.etiqueta_interpretacion = ttk.Label(
+            pie, text="", wraplength=900, justify="left")
+        self.etiqueta_interpretacion.pack(anchor="w", pady=(2, 6))
+
+        fila_comunicado = ttk.Frame(pie)
+        fila_comunicado.pack(fill="x", pady=(0, 6))
+        ttk.Label(fila_comunicado,
+                  text="Resultado comunicado a la madre:").pack(side="left")
+        self.var_comunicado = tk.StringVar(value="")
+        ttk.Combobox(fila_comunicado, textvariable=self.var_comunicado,
+                     values=("Sí", "No"), state="readonly",
+                     width=6).pack(side="left", padx=6)
+        ttk.Label(fila_comunicado,
+                  text="Firma del evaluador(a):").pack(side="left", padx=(16, 6))
+        ttk.Entry(fila_comunicado, textvariable=self.var_evaluador,
+                  width=30).pack(side="left")
+
+        botones = ttk.Frame(pie)
+        botones.pack(fill="x")
+        ttk.Button(botones, text="Guardar",
+                   command=self._guardar).pack(side="left", padx=4)
+        ttk.Button(botones, text="Imprimir",
+                   command=self._imprimir).pack(side="left", padx=4)
+        ttk.Button(botones, text="Ver formulario PDF",
+                   command=self._abrir_formulario_pdf).pack(side="left", padx=4)
+        ttk.Button(botones, text="Ocultar formulario",
+                   command=self._ocultar).pack(side="right", padx=4)
+        self._recalcular()
+
+    def _ocultar(self):
+        alternar = getattr(self.app, "_alternar_afass", None)
+        if callable(alternar):
+            alternar()
+
+    # ---------- comportamiento ----------
+    def _rueda(self, evento):
+        self.canvas.yview_scroll(-1 * (evento.delta // 120), "units")
+
+    def _respuestas(self):
+        return [variable.get() for variable in self.resp_vars]
+
+    def _recalcular(self):
+        respuestas = self._respuestas()
+        contestadas = sum(1 for r in respuestas if r in ("Sí", "No"))
+        total = sum(1 for r in respuestas if r == "Sí")
+        self.etiqueta_total.config(
+            text=f"PUNTUACIÓN: Total de respuestas «Sí» = {total} de "
+                 f"{AFASS_TOTAL_PREGUNTAS}"
+                 + ("" if contestadas == AFASS_TOTAL_PREGUNTAS
+                    else f"  ({AFASS_TOTAL_PREGUNTAS - contestadas} sin contestar)"))
+        interpretacion, color = afass_interpretacion(total)
+        self.etiqueta_interpretacion.config(
+            text=("Interpretación: " + interpretacion)
+            if contestadas == AFASS_TOTAL_PREGUNTAS
+            else "Conteste las 15 preguntas para interpretar el puntaje.",
+            foreground=color if contestadas == AFASS_TOTAL_PREGUNTAS
+            else "#777777")
+
+    def _limpiar_campos(self):
+        self.var_madre.set("")
+        self.var_fecha.set(date.today().isoformat())
+        self.var_evaluador.set("")
+        self.var_servicio.set("")
+        self.var_comunicado.set("")
+        for variable in self.resp_vars:
+            variable.set("")
+        self.registro_id = None
+
+    def _cargar_guardado(self):
+        """Vuelca al formulario la última evaluación AFASS del paciente."""
+        if not self.paciente_id:
+            return
+        conn = conectar()
+        fila = conn.execute(
+            """SELECT nombre_madre, fecha, evaluador, servicio, total_si,
+                      interpretacion, respuestas_json, comunicado
+               FROM evaluacion_afass WHERE paciente_id = ?
+               ORDER BY id DESC LIMIT 1""",
+            (self.paciente_id,),
+        ).fetchone()
+        conn.close()
+        if fila is None:
+            return
+        self._aplicar_fila(fila)
+        self.app.status.config(
+            text=f"Editando criterios AFASS guardados | Paciente N° "
+                 f"{self.paciente_id}")
+
+    def _aplicar_fila(self, fila):
+        """Vuelca al formulario los campos de una evaluación guardada."""
+        (nombre_madre, fecha, evaluador, servicio, _total, _interp,
+         respuestas_json, comunicado) = fila
+        if nombre_madre:
+            self.var_madre.set(nombre_madre)
+        if fecha:
+            self.var_fecha.set(fecha)
+        if evaluador:
+            self.var_evaluador.set(evaluador)
+        if servicio:
+            self.var_servicio.set(servicio)
+        if comunicado:
+            self.var_comunicado.set(comunicado)
+        try:
+            guardadas = json.loads(respuestas_json or "{}")
+        except (TypeError, ValueError):
+            guardadas = {}
+        for indice, variable in enumerate(self.resp_vars, start=1):
+            valor = guardadas.get(str(indice))
+            if valor in ("Sí", "No"):
+                variable.set(valor)
+        self._recalcular()
+
+    def _guardar(self):
+        respuestas = self._respuestas()
+        faltantes = [str(i) for i, r in enumerate(respuestas, start=1)
+                     if r not in ("Sí", "No")]
+        if faltantes:
+            messagebox.showwarning(
+                "Criterios AFASS",
+                "Falta contestar la(s) pregunta(s): " + ", ".join(faltantes)
+                + "\n\nMarque SÍ o NO en cada criterio junto con la madre.",
+                parent=self.app)
+            return
+        if not self.app._exigir_paciente():
+            return
+        self.paciente_id = self.app._paciente_id
+        total = sum(1 for r in respuestas if r == "Sí")
+        interpretacion, _color = afass_interpretacion(total)
+        respuestas_json = json.dumps(
+            {str(i): r for i, r in enumerate(respuestas, start=1)},
+            ensure_ascii=False)
+        valores = (self.var_madre.get().strip(), self.var_fecha.get().strip(),
+                   self.var_evaluador.get().strip(),
+                   self.var_servicio.get().strip(), total, interpretacion,
+                   respuestas_json, self.var_comunicado.get())
+        conn = conectar()
+        try:
+            anterior = conn.execute(
+                "SELECT id FROM evaluacion_afass WHERE paciente_id = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (self.paciente_id,),
+            ).fetchone()
+            if anterior:
+                self.registro_id = anterior[0]
+                conn.execute(
+                    """UPDATE evaluacion_afass
+                       SET nombre_madre=?, fecha=?, evaluador=?, servicio=?,
+                           total_si=?, interpretacion=?, respuestas_json=?,
+                           comunicado=?
+                       WHERE id=?""",
+                    (*valores, anterior[0]),
+                )
+            else:
+                cursor = conn.execute(
+                    """INSERT INTO evaluacion_afass
+                       (paciente_id, nombre_madre, fecha, evaluador, servicio,
+                        total_si, interpretacion, respuestas_json, comunicado)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (self.paciente_id, *valores),
+                )
+                self.registro_id = cursor.lastrowid
+            conn.commit()
+        except Exception as e:
+            messagebox.showerror("Error", str(e), parent=self.app)
+            return
+        finally:
+            conn.close()
+        self._recalcular()
+        self.app.status.config(
+            text=f"Criterios AFASS guardados (N° {self.registro_id}, "
+                 f"{total}/{AFASS_TOTAL_PREGUNTAS} «Sí») | Paciente N° "
+                 f"{self.paciente_id}")
+        messagebox.showinfo(
+            "Criterios AFASS",
+            f"Evaluación guardada.\n\nTotal de respuestas «Sí»: {total} de "
+            f"{AFASS_TOTAL_PREGUNTAS}\n{interpretacion}",
+            parent=self.app)
+
+    def _nombre_paciente(self):
+        """Nombre del paciente asociado a la evaluación en curso."""
+        if self.paciente_id:
+            conn = conectar()
+            fila = conn.execute(
+                "SELECT nombre FROM paciente WHERE id = ?",
+                (self.paciente_id,)).fetchone()
+            conn.close()
+            if fila and fila[0]:
+                return fila[0]
+        campo = getattr(self.app, "campos", {}).get("nombre")
+        return campo.get().strip() if campo is not None else ""
+
+    def _imprimir(self):
+        """Exporta el formulario AFASS lleno (estado actual) a PDF y lo abre."""
+        base = (self.var_madre.get().strip() or "evaluacion").replace(" ", "_")
+        sugerencia = (f"afass_{base.lower()}_"
+                      + datetime.now().strftime("%Y%m%d_%H%M%S") + ".pdf")
+        ruta = filedialog.asksaveasfilename(
+            parent=self.app, title="Guardar Criterios AFASS en PDF",
+            initialfile=sugerencia, defaultextension=".pdf",
+            filetypes=[("Archivo PDF", "*.pdf")])
+        if not ruta:
+            return
+        datos = {
+            "nombre_madre": self.var_madre.get().strip(),
+            "fecha": self.var_fecha.get().strip(),
+            "evaluador": self.var_evaluador.get().strip(),
+            "servicio": self.var_servicio.get().strip(),
+            "paciente": self._nombre_paciente(),
+            "respuestas": self._respuestas(),
+            "comunicado": self.var_comunicado.get(),
+        }
+        try:
+            generar_pdf_afass(ruta, datos)
+        except Exception as e:
+            messagebox.showerror("Criterios AFASS", str(e), parent=self.app)
+            return
+        try:
+            os.startfile(ruta)
+        except Exception:
+            pass
+        self.app.status.config(
+            text=f"Criterios AFASS exportados a PDF: {ruta}")
+
+    def _abrir_formulario_pdf(self):
+        carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "Fórmula pediatrica")
+        ruta = None
+        if os.path.isdir(carpeta):
+            try:
+                for archivo in sorted(os.listdir(carpeta), key=str.lower):
+                    if archivo.lower().endswith(".pdf") and "afass" in archivo.lower():
+                        ruta = os.path.join(carpeta, archivo)
+                        break
+            except OSError:
+                ruta = None
+        if not ruta:
+            messagebox.showwarning(
+                "Criterios AFASS",
+                "No se encontró el PDF del formulario en la carpeta "
+                "'Fórmula pediatrica'.\nUse «Añadir documento...» para "
+                "agregarlo.", parent=self.app)
+            return
+        try:
+            os.startfile(ruta)
+        except Exception as e:
+            messagebox.showerror("Criterios AFASS", str(e), parent=self.app)
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Historia Clínica Nutricional Pediátrica (1-6)")
-        self.geometry("900x640")
+        self.geometry("1024x680")
         self._paciente_id = None
         self._edit_paciente_id = None
         self._backfill_avisos = []
@@ -3364,6 +4527,17 @@ class App(tk.Tk):
                    background=[("selected", self.COLOR_PANEL),
                                ("active", self.COLOR_AMARILLO)],
                    foreground=[("selected", self.COLOR_PRIMARIO_OSC)])
+        estilo.configure("Ficha.TButton", background=self.COLOR_ROSA,
+                         foreground=self.COLOR_TEXTO, borderwidth=0,
+                         focusthickness=0, padding=(8, 4), font=(fuente, 9))
+        estilo.map("Ficha.TButton",
+                   background=[("active", self.COLOR_AMARILLO)])
+        estilo.configure("FichaActiva.TButton", background=self.COLOR_PANEL,
+                         foreground=self.COLOR_PRIMARIO_OSC, borderwidth=0,
+                         focusthickness=0, padding=(8, 4),
+                         font=(fuente, 9, "bold"))
+        estilo.map("FichaActiva.TButton",
+                   background=[("active", self.COLOR_PANEL)])
         estilo.configure("Treeview", background=self.COLOR_PANEL,
                          fieldbackground=self.COLOR_PANEL,
                          foreground=self.COLOR_TEXTO, rowheight=24,
@@ -3468,7 +4642,7 @@ class App(tk.Tk):
 
     def _crear_notebook(self):
         self._crear_encabezado()
-        self.notebook = ttk.Notebook(self)
+        self.notebook = NotebookDosFilas(self, por_fila=8)
         self.notebook.pack(fill="both", expand=True)
         self._tab_paciente()
         self._tab_antecedentes_neonatal()
@@ -3483,6 +4657,7 @@ class App(tk.Tk):
         self._tab_diagnostico_pes()
         self._tab_intervencion_pan()
         self._tab_lactancia_materna()
+        self._tab_formula()
         self._tab_menu_elaboracion()
 
         barra = ttk.Frame(self)
@@ -3507,7 +4682,7 @@ class App(tk.Tk):
     # ---------- Pestaña Paciente ----------
     def _tab_paciente(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="Paciente")
+        self.notebook.add(tab, text="1. Paciente")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -3588,7 +4763,7 @@ class App(tk.Tk):
     # ---------- Pestaña 4 Antropometría ----------
     def _tab_antecedentes(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="4. Antropometría")
+        self.notebook.add(tab, text="5. Antropometría")
         self._tab_ant = tab
 
         contenedor = ttk.Frame(tab)
@@ -3857,7 +5032,7 @@ class App(tk.Tk):
     # ---------- Pestaña 6 Interacción Fármaco-Nutriente ----------
     def _tab_farmaco(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="6. Interacción Fármaco-Nutriente")
+        self.notebook.add(tab, text="7. Fármaco-nutriente")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -4090,7 +5265,7 @@ class App(tk.Tk):
     # ---------- Pestaña 8 Ecuaciones Predictivas ----------
     def _tab_ecuaciones(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="8. Ecuaciones Predictivas")
+        self.notebook.add(tab, text="9. Ecuaciones")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -4281,7 +5456,7 @@ class App(tk.Tk):
     # ---------- Pestaña 2 Recuento Alimentario ----------
     def _tab_recuento(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="2. Recuento Alimentario")
+        self.notebook.add(tab, text="3. Recuento alimentario")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -4782,7 +5957,7 @@ class App(tk.Tk):
     # ---------- Pestaña 3 Recuento 24 horas ----------
     def _tab_recuento24h(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="3. Recuento 24 horas")
+        self.notebook.add(tab, text="4. Recuento 24 h")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -5420,7 +6595,7 @@ class App(tk.Tk):
     # ---------- Pesta�a 4 Evaluaci�n Bioqu�mica ----------
     def _tab_bioquimica(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="7. Evaluación Bioquímica")
+        self.notebook.add(tab, text="8. Bioquímica")
 
         barra = ttk.Frame(tab)
         barra.pack(fill="x", padx=8, pady=4)
@@ -5590,7 +6765,7 @@ class App(tk.Tk):
     # ---------- Pestaña 5 Signos Clínicos (CANS score) ----------
     def _tab_cans(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="5. Signos Clínicos (CANS)")
+        self.notebook.add(tab, text="6. Signos clínicos")
         self._tab_signos = tab
 
         barra = ttk.Frame(tab)
@@ -6486,7 +7661,7 @@ class App(tk.Tk):
 
     def _exigir_paciente(self):
         if not getattr(self, "_paciente_id", None):
-            messagebox.showwarning("Datos", "Primero guarde un paciente en la pestaña 'Paciente'")
+            messagebox.showwarning("Datos", "Primero guarde un paciente en la pestaña '1. Paciente'")
             return False
         if not self.campos["nombre"].get().strip():
             messagebox.showwarning("Datos", "Ingrese el nombre del paciente antes de guardar")
@@ -7618,7 +8793,7 @@ class App(tk.Tk):
         Omite la ficha de identificación porque esos datos ya están en Paciente.
         """
         marco = ttk.Frame(self.notebook)
-        self.notebook.add(marco, text="1. Antecedentes")
+        self.notebook.add(marco, text="2. Antecedentes")
         self._tab_ant_nn = marco
         self.ante_nn = {}
         self.ante_nn_textos = {}
@@ -7790,7 +8965,7 @@ class App(tk.Tk):
 
     def _tab_distribucion_equivalentes(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="9. Distribución de equivalentes")
+        self.notebook.add(tab, text="10. Equivalentes")
         self._tab_equiv = tab
         self.eq_vars = {}
         self.eq_total_fila = {}
@@ -8057,7 +9232,7 @@ class App(tk.Tk):
     def _tab_diagnostico_pes(self):
         """Paso 2 del PAN: Diagnóstico nutricio en formato PESS."""
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="10. Diagnóstico nutricio (PES)")
+        self.notebook.add(tab, text="11. Diagnóstico (PES)")
         self._tab_pes = tab
 
         barra = ttk.Frame(tab)
@@ -8608,7 +9783,7 @@ class App(tk.Tk):
 
     def _tab_intervencion_pan(self):
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="11. Intervención nutricional (PAN)")
+        self.notebook.add(tab, text="12. Intervención (PAN)")
         interior = ttk.Frame(tab)
         interior.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -8818,7 +9993,7 @@ class App(tk.Tk):
         """Paso 3 del PAN: elaboración de menús por tiempo de comida a partir de la
         distribución de equivalentes (pestaña 9) y del catálogo SMAE-5."""
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="12. Elaboración de menús")
+        self.notebook.add(tab, text="15. Menús")
         self._tab_menu = tab
         self.men_dia = DIAS_SEMANA_CLAVES[0]
         self.men_datos_dias = {clave: {} for clave in DIAS_SEMANA_CLAVES}
@@ -9767,428 +10942,51 @@ class App(tk.Tk):
     def _tab_lactancia_materna(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="13. Lactancia materna")
-        interior = ttk.Frame(tab)
-        interior.pack(fill="both", expand=True, padx=10, pady=10)
+        gestor = GestorDocumentosPDF(self, tab, excluir={"Fórmula pediatrica"})
+        gestor.pack(fill="both", expand=True, padx=10, pady=10)
+        self.gestor_lactancia = gestor
 
-        barra_sup = ttk.Frame(interior)
-        barra_sup.pack(fill="x", pady=(0, 4))
-        ttk.Label(barra_sup, text="Documentos PDF:",
-                  font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=(0, 6))
-        ttk.Button(barra_sup, text="Abrir",
-                   command=self._abrir_pdf_seleccionado).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Imprimir",
-                   command=self._imprimir_pdf_seleccionado).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Añadir documento...",
-                   command=self._anadir_documento).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Nueva carpeta...",
-                   command=self._nueva_carpeta).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Abrir carpeta",
-                   command=self._abrir_carpeta).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Borrar documento",
-                   command=self._borrar_documento).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Borrar carpeta",
-                   command=self._borrar_carpeta).pack(side="left", padx=4)
-        ttk.Button(barra_sup, text="Actualizar lista",
-                   command=self._actualizar_lista_pdfs).pack(side="left", padx=4)
-
-        marco_docs = ttk.LabelFrame(
-            interior, text="Documentos y vista previa (doble clic en la carpeta "
-                           "para expandir o contraer)")
-        marco_docs.pack(fill="both", expand=True)
-
-        marco_lista = ttk.Frame(marco_docs)
-        marco_lista.pack(side="left", fill="y", padx=(8, 2), pady=8)
-        self.pdf_lista = ttk.Treeview(marco_lista, show="tree", selectmode="browse",
-                                      height=14)
-        self.pdf_lista.column("#0", width=380, stretch=True)
-        self.pdf_lista.pack(side="left", fill="both", expand=True)
-        tsb_lista = ttk.Scrollbar(marco_lista, orient="vertical",
-                                  command=self.pdf_lista.yview)
-        self.pdf_lista.configure(yscrollcommand=tsb_lista.set)
-        tsb_lista.pack(side="right", fill="y")
-        self.pdf_lista.bind("<<TreeviewSelect>>", self._mostrar_preview_pdf)
-        self.pdf_lista.bind("<Double-1>", self._alternar_carpeta)
-        self.pdf_lista.bind("<Return>", self._alternar_carpeta)
-        self.pdf_lista.tag_configure("carpeta", foreground="#8B5A00")
-
-        marco_vista = ttk.LabelFrame(marco_docs, text="Vista previa")
-        marco_vista.pack(side="left", fill="both", expand=True, padx=(2, 8), pady=8)
-
-        barra_pag = ttk.Frame(marco_vista)
-        barra_pag.grid(row=0, column=0, columnspan=2, sticky="ew",
-                       padx=4, pady=(4, 2))
-        self.pdf_btn_prev = ttk.Button(barra_pag, text="\u25C0 Anterior", width=11,
-                                       command=self._pdf_pagina_anterior,
-                                       state="disabled")
-        self.pdf_btn_prev.pack(side="left")
-        self.pdf_btn_next = ttk.Button(barra_pag, text="Siguiente \u25B6", width=11,
-                                       command=self._pdf_pagina_siguiente,
-                                       state="disabled")
-        self.pdf_btn_next.pack(side="right")
-        self.pdf_pagina_var = tk.StringVar(value="")
-        ttk.Label(barra_pag, textvariable=self.pdf_pagina_var,
-                  anchor="center").pack(side="left", expand=True, fill="x")
-
-        self.pdf_vista = tk.Canvas(marco_vista, bg="white")
-        vsb = ttk.Scrollbar(marco_vista, orient="vertical", command=self.pdf_vista.yview)
-        hsb = ttk.Scrollbar(marco_vista, orient="horizontal", command=self.pdf_vista.xview)
-        self.pdf_vista.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self.pdf_vista.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        hsb.grid(row=2, column=0, sticky="ew")
-        marco_vista.rowconfigure(1, weight=1)
-        marco_vista.columnconfigure(0, weight=1)
-        self.pdf_imagen = None
-        self.pdf_ruta_actual = None
-        self.pdf_pagina_actual = 0
-        self.pdf_vista.create_text(10, 10, anchor="nw",
-                                   text="Seleccione un documento de la lista\npara ver "
-                                        "la vista previa de sus páginas.",
-                                   fill="#888888", tags=("aviso",))
-        self.pdf_vista.bind("<Control-MouseWheel>", self._pdf_rueda_paginas)
-
-        self._actualizar_lista_pdfs()
-
-    def _carpetas_de_documentos(self):
-        raiz = os.path.dirname(os.path.abspath(__file__))
-        ignorar = {".venv", "__pycache__", ".mypy_cache", ".git", "data"}
-        carpetas = []
+    # ---------- Pestaña Fórmula ----------
+    def _tab_formula(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="14. Fórmula")
+        raiz_formula = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "Fórmula pediatrica")
         try:
-            nombres = sorted(os.listdir(raiz), key=str.lower)
+            os.makedirs(raiz_formula, exist_ok=True)
         except OSError:
-            return carpetas
-        for nombre in nombres:
-            carpeta = os.path.join(raiz, nombre)
-            if not os.path.isdir(carpeta):
-                continue
-            if nombre.startswith(".") or nombre in ignorar:
-                continue
-            pdfs = []
-            try:
-                for archivo in sorted(os.listdir(carpeta), key=str.lower):
-                    if archivo.lower().endswith(".pdf"):
-                        ruta = os.path.join(carpeta, archivo)
-                        if os.path.isfile(ruta):
-                            pdfs.append((archivo, ruta))
-            except OSError:
-                pass
-            carpetas.append((carpeta, pdfs))
-        return carpetas
+            pass
 
-    def _actualizar_lista_pdfs(self):
-        previo = self._token_seleccionado()
-        abiertas = set()
-        for iid in self.pdf_lista.get_children(""):
-            if self.pdf_lista.item(iid, "open"):
-                abiertas.add(iid)
-        self.pdf_lista.delete(*self.pdf_lista.get_children(""))
-        self.pdf_tokens = {}
-        for num, (carpeta, pdfs) in enumerate(self._carpetas_de_documentos()):
-            iid_carpeta = f"carpeta:{num}"
-            self.pdf_tokens[iid_carpeta] = ("carpeta", carpeta)
-            abierta = True if not abiertas else iid_carpeta in abiertas
-            self.pdf_lista.insert(
-                "", "end", iid=iid_carpeta, open=abierta, tags=("carpeta",),
-                text=" \U0001F4C1  " + os.path.basename(carpeta))
-            for j, (nombre, ruta) in enumerate(pdfs):
-                iid_pdf = f"pdf:{num}:{j}"
-                self.pdf_tokens[iid_pdf] = ("pdf", ruta)
-                self.pdf_lista.insert(
-                    iid_carpeta, "end", iid=iid_pdf, text="     " + nombre)
-        iid_sel = next((iid for iid, t in self.pdf_tokens.items() if t == previo),
-                       None)
-        if iid_sel is None:
-            hijos = self.pdf_lista.get_children("")
-            iid_sel = hijos[0] if hijos else None
-        if iid_sel is not None:
-            self.pdf_lista.selection_set(iid_sel)
-            self.pdf_lista.see(iid_sel)
-        self._mostrar_preview_pdf()
+        barra_afass = ttk.Frame(tab)
+        barra_afass.pack(fill="x", padx=10, pady=(10, 4))
+        self.btn_afass = ttk.Button(barra_afass, text="Criterios AFASS",
+                                    command=self._alternar_afass)
+        self.btn_afass.pack(side="left")
+        ttk.Label(
+            barra_afass,
+            text="Despliega el formulario de 15 preguntas (SÍ/NO) con conteo "
+                 "automático e interpretación del resultado; se guarda por "
+                 "paciente en la base de datos.",
+            foreground="#5A6B75").pack(side="left", padx=10)
 
-    def _token_seleccionado(self):
-        sel = self.pdf_lista.selection()
-        if not sel:
-            return None
-        return getattr(self, "pdf_tokens", {}).get(sel[0])
+        self.gestor_formula = GestorDocumentosPDF(self, tab, raiz=raiz_formula)
+        self.gestor_formula.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.formulario_afass = FormularioAFASS(self, tab)
 
-    def _alternar_carpeta(self, _event=None):
-        sel = self.pdf_lista.selection()
-        if not sel:
-            return
-        token = getattr(self, "pdf_tokens", {}).get(sel[0])
-        if not token or token[0] != "carpeta":
-            return "break"
-        self.pdf_lista.item(sel[0], open=not self.pdf_lista.item(sel[0], "open"))
-        return "break"
-
-    def _carpeta_destino(self):
-        raiz = os.path.dirname(os.path.abspath(__file__))
-        token = self._token_seleccionado()
-        if token and token[0] == "carpeta":
-            return token[1]
-        if token and token[0] == "pdf":
-            return os.path.dirname(token[1])
-        predet = os.path.join(raiz, "Lactancia materna")
-        return predet if os.path.isdir(predet) else raiz
-
-    def _nueva_carpeta(self):
-        raiz = os.path.dirname(os.path.abspath(__file__))
-        nombre = simpledialog.askstring(
-            "Nueva carpeta", "Nombre de la nueva carpeta:", parent=self)
-        if not nombre:
-            return
-        nombre = nombre.strip()
-        if not nombre:
-            return
-        destino = os.path.join(raiz, nombre)
-        if os.path.exists(destino):
-            messagebox.showwarning("Nueva carpeta",
-                                   "Ya existe una carpeta con ese nombre.")
-            return
-        try:
-            os.makedirs(destino)
-        except OSError as e:
-            messagebox.showerror("Nueva carpeta", str(e))
-            return
-        self._actualizar_lista_pdfs()
-        iid = next((iid for iid, t in self.pdf_tokens.items()
-                    if t == ("carpeta", destino)), None)
-        if iid is not None:
-            self.pdf_lista.selection_set(iid)
-            self.pdf_lista.see(iid)
-            self._mostrar_preview_pdf()
-        self.status.config(text=f"Carpeta creada: {nombre}")
-
-    def _abrir_carpeta(self):
-        raiz = os.path.dirname(os.path.abspath(__file__))
-        token = self._token_seleccionado()
-        if token is None:
-            ruta = raiz
-        elif token[0] == "carpeta":
-            ruta = token[1]
+    def _alternar_afass(self):
+        """Despliega u oculta el formulario AFASS en la pestaña Fórmula."""
+        if self.formulario_afass.winfo_ismapped():
+            self.formulario_afass.pack_forget()
+            self.gestor_formula.pack(fill="both", expand=True,
+                                     padx=10, pady=(0, 10))
+            self.btn_afass.config(text="Criterios AFASS")
+            self.status.config(text="Gestor de documentos de fórmula")
         else:
-            ruta = os.path.dirname(token[1])
-        try:
-            os.startfile(ruta)
-            self.status.config(text=f"Carpeta abierta: {ruta}")
-        except Exception as e:
-            messagebox.showerror("Abrir carpeta", str(e))
-
-    def _borrar_documento(self):
-        token = self._token_seleccionado()
-        if token is None or token[0] != "pdf":
-            messagebox.showwarning(
-                "Borrar documento", "Seleccione un documento PDF de la lista")
-            return
-        ruta = token[1]
-        nombre = os.path.basename(ruta)
-        if not messagebox.askyesno(
-                "Borrar documento",
-                f"¿Desea borrar el documento \"{nombre}\"?\n\n"
-                "Esta acción no se puede deshacer."):
-            return
-        try:
-            os.remove(ruta)
-        except OSError as e:
-            messagebox.showerror("Borrar documento", str(e))
-            return
-        self._actualizar_lista_pdfs()
-        self.status.config(text=f"Documento borrado: {nombre}")
-
-    def _borrar_carpeta(self):
-        token = self._token_seleccionado()
-        if token is None or token[0] != "carpeta":
-            messagebox.showwarning(
-                "Borrar carpeta", "Seleccione una carpeta de la lista")
-            return
-        carpeta = token[1]
-        nombre = os.path.basename(carpeta)
-        try:
-            contenido = os.listdir(carpeta)
-        except OSError as e:
-            messagebox.showerror("Borrar carpeta", str(e))
-            return
-        if contenido:
-            if not messagebox.askyesno(
-                    "Borrar carpeta",
-                    f"La carpeta \"{nombre}\" no está vacía y contiene "
-                    f"{len(contenido)} elemento(s).\n\n"
-                    "¿Desea borrarla junto con todo su contenido?\n"
-                    "Esta acción no se puede deshacer."):
-                return
-        elif not messagebox.askyesno(
-                "Borrar carpeta", f"¿Desea borrar la carpeta \"{nombre}\"?\n\n"
-                "Esta acción no se puede deshacer."):
-            return
-        try:
-            shutil.rmtree(carpeta)
-        except OSError as e:
-            messagebox.showerror("Borrar carpeta", str(e))
-            return
-        self._actualizar_lista_pdfs()
-        self.status.config(text=f"Carpeta borrada: {nombre}")
-
-    def _anadir_documento(self):
-        rutas = filedialog.askopenfilenames(
-            parent=self, title="Añadir documento PDF (puede elegir varios)",
-            filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")])
-        if not rutas:
-            return
-        carpeta = self._carpeta_destino()
-        copiados = []
-        errores = []
-        for ruta in rutas:
-            nombre = os.path.basename(ruta)
-            destino = os.path.join(carpeta, nombre)
-            if os.path.abspath(ruta) == os.path.abspath(destino):
-                continue
-            try:
-                shutil.copy2(ruta, destino)
-                copiados.append(nombre)
-            except OSError as e:
-                errores.append(f"{nombre}: {e}")
-        if copiados:
-            self._actualizar_lista_pdfs()
-            objetivo = os.path.join(carpeta, copiados[0])
-            iid = next((iid for iid, t in self.pdf_tokens.items()
-                        if t == ("pdf", objetivo)), None)
-            if iid is not None:
-                self.pdf_lista.selection_set(iid)
-                self.pdf_lista.see(iid)
-                self._mostrar_preview_pdf()
-            self.status.config(
-                text=f"Documentos añadidos a {os.path.basename(carpeta)}: "
-                     f"{', '.join(copiados)}")
-        mensaje = ""
-        if copiados:
-            mensaje += ("Se copiaron a la carpeta "
-                        f"'{os.path.basename(carpeta)}':\n" + "\n".join(copiados))
-        if errores:
-            mensaje += ("\n\nNo se pudieron copiar:\n" + "\n".join(errores)
-                        if mensaje else "No se pudieron copiar:\n" + "\n".join(errores))
-        if mensaje:
-            messagebox.showinfo("Añadir documento", mensaje)
-
-    def _pdf_seleccionado(self):
-        token = self._token_seleccionado()
-        if token is None or token[0] != "pdf":
-            messagebox.showwarning(
-                "PDF", "Seleccione un documento PDF de la lista")
-            return None
-        ruta = token[1]
-        return (os.path.basename(ruta), ruta)
-
-    def _mostrar_preview_pdf(self, _event=None):
-        token = self._token_seleccionado()
-        self.pdf_vista.delete("all")
-        self.pdf_ruta_actual = None
-        self.pdf_pagina_actual = 0
-        if hasattr(self, "pdf_pagina_var"):
-            self.pdf_pagina_var.set("")
-        if hasattr(self, "pdf_btn_prev"):
-            self.pdf_btn_prev.config(state="disabled")
-            self.pdf_btn_next.config(state="disabled")
-        if token is None:
-            self.pdf_vista.create_text(
-                10, 10, anchor="nw", fill="#888888",
-                text="Seleccione un documento PDF para ver su vista previa.")
-            return
-        if token[0] == "carpeta":
-            self.pdf_vista.create_text(
-                10, 10, anchor="nw", fill="#888888",
-                text=f"Carpeta: {os.path.basename(token[1])}\n\n"
-                     "Seleccione un documento PDF para ver su vista previa.\n"
-                     "Use «Abrir carpeta» para verla en el Explorador.")
-            return
-        ruta = token[1]
-        try:
-            import pymupdf as fitz
-        except ImportError:
-            try:
-                import fitz
-            except ImportError:
-                self.pdf_vista.create_text(
-                    10, 10, anchor="nw", fill="#888888",
-                    text="Vista previa no disponible (falta PyMuPDF).")
-                return
-        self.pdf_ruta_actual = ruta
-        self._render_pagina_pdf()
-
-    def _render_pagina_pdf(self):
-        ruta = getattr(self, "pdf_ruta_actual", None)
-        if not ruta:
-            return
-        try:
-            import pymupdf as fitz
-        except ImportError:
-            import fitz
-        try:
-            doc = fitz.open(ruta)
-            total = doc.page_count
-            indice = min(max(self.pdf_pagina_actual, 0), total - 1)
-            self.pdf_pagina_actual = indice
-            pagina = doc[indice]
-            pix = pagina.get_pixmap(matrix=fitz.Matrix(1.3, 1.3))
-            datos = pix.tobytes("png")
-            doc.close()
-            self.pdf_imagen = tk.PhotoImage(data=datos)
-            self.pdf_vista.delete("all")
-            self.pdf_vista.create_image(0, 0, anchor="nw", image=self.pdf_imagen)
-            self.pdf_vista.configure(scrollregion=(0, 0, self.pdf_imagen.width(),
-                                                   self.pdf_imagen.height()))
-            self.pdf_vista.xview_moveto(0)
-            self.pdf_vista.yview_moveto(0)
-            self.pdf_pagina_var.set(f"Página {indice + 1} de {total}")
-            self.pdf_btn_prev.config(state=("normal" if indice > 0 else "disabled"))
-            self.pdf_btn_next.config(
-                state=("normal" if indice < total - 1 else "disabled"))
-        except Exception as e:
-            self.pdf_vista.delete("all")
-            self.pdf_vista.create_text(
-                10, 10, anchor="nw", fill="#C0392B",
-                text=f"No se pudo previsualizar el documento:\n{e}")
-
-    def _pdf_pagina_anterior(self):
-        if self.pdf_pagina_actual > 0:
-            self.pdf_pagina_actual -= 1
-            self._render_pagina_pdf()
-
-    def _pdf_pagina_siguiente(self):
-        self.pdf_pagina_actual += 1
-        self._render_pagina_pdf()
-
-    def _pdf_rueda_paginas(self, event):
-        if event.delta > 0:
-            self._pdf_pagina_anterior()
-        elif event.delta < 0:
-            self._pdf_pagina_siguiente()
-        return "break"
-
-    def _abrir_pdf_seleccionado(self):
-        elegido = self._pdf_seleccionado()
-        if elegido is None:
-            return
-        nombre, ruta = elegido
-        try:
-            os.startfile(ruta)
-            self.status.config(text=f"Documento abierto: {nombre}")
-        except Exception as e:
-            messagebox.showerror("Abrir PDF", str(e))
-
-    def _imprimir_pdf_seleccionado(self):
-        elegido = self._pdf_seleccionado()
-        if elegido is None:
-            return
-        nombre, ruta = elegido
-        try:
-            os.startfile(ruta)
-            messagebox.showinfo(
-                "Imprimir PDF",
-                f"Se abrió el documento \"{nombre}\".\nEn el visor, pulse Imprimir "
-                "(Ctrl + P) y elija la impresora en el cuadro de diálogo.")
-            self.status.config(text=f"Documento abierto para imprimir: {nombre}")
-        except Exception as e:
-            messagebox.showerror("Imprimir PDF", str(e))
+            self.gestor_formula.pack_forget()
+            self.formulario_afass.pack(fill="both", expand=True,
+                                       padx=10, pady=(0, 10))
+            self.btn_afass.config(text="Ocultar formulario AFASS")
+            self.formulario_afass.al_mostrar()
 
     def _equivalentes_celda(self, grupo, comida):
         var = self.eq_vars.get((grupo, comida))

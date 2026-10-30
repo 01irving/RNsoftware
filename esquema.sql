@@ -306,3 +306,18 @@ CREATE INDEX IF NOT EXISTS idx_antecedentes_nn_paciente ON antecedentes_neonatal
 
 CREATE TABLE IF NOT EXISTS distribucion_equivalentes(id INTEGER PRIMARY KEY AUTOINCREMENT,paciente_id INTEGER NOT NULL,energia_objetivo_kcal REAL,filas_json TEXT,macro_json TEXT,equiv_json TEXT,observaciones TEXT,fecha_registro TEXT DEFAULT (datetime('now','localtime')));
 CREATE INDEX IF NOT EXISTS idx_distribucion_equiv_paciente ON distribucion_equivalentes(paciente_id);
+
+CREATE TABLE IF NOT EXISTS evaluacion_afass (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER NOT NULL REFERENCES paciente(id) ON DELETE CASCADE,
+    nombre_madre TEXT,
+    fecha TEXT,
+    evaluador TEXT,
+    servicio TEXT,
+    total_si INTEGER,
+    interpretacion TEXT,
+    respuestas_json TEXT,
+    comunicado TEXT,
+    fecha_registro TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_afass_paciente ON evaluacion_afass(paciente_id);

@@ -3,3 +3,4 @@ pygrowup2==1.0.0
 openpyxl==3.1.5
 pymupdf==1.28.2
 pillow==12.3.0
+reportlab==5.0.0
